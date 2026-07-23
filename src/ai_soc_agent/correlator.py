@@ -85,11 +85,13 @@ def _build_alert(
     actor: str,
     events: tuple[NormalizedEvent, ...],
     summary: str,
+    targets: tuple[str, ...] | None = None,
 ) -> Alert:
     sources = tuple(sorted({event.source for event in events}))
-    targets = tuple(
-        sorted({event.target for event in events if event.target not in ("", "-", "unknown")})
-    )
+    if targets is None:
+        targets = tuple(
+            sorted({event.target for event in events if event.target not in ("", "-", "unknown")})
+        )
     first_seen = events[0].ts
     last_seen = events[-1].ts
     return Alert(
@@ -160,6 +162,91 @@ def detect_brute_force(
     return alerts
 
 
+def _source_family(event: NormalizedEvent) -> str:
+    source = event.source.strip().casefold()
+    if source in {"ssh", "sshd"} or "ssh" in source:
+        return "ssh"
+    if source == "vpn" or "vpn" in source:
+        return "vpn"
+    if source in {"nginx", "okta", "web", "http", "https"}:
+        return "web"
+    return source
+
+
+def _event_user(event: NormalizedEvent) -> str | None:
+    for key in ("user", "username", "remote_user", "account"):
+        value = event.extra.get(key)
+        if isinstance(value, str) and value not in ("", "-", "unknown"):
+            return value.strip().casefold()
+
+    if _source_family(event) == "web" and event.target.startswith("/"):
+        return None
+    if event.target in ("", "-", "unknown"):
+        return None
+    return event.target.strip().casefold()
+
+
+def detect_credential_stuffing(
+    events: list[NormalizedEvent],
+    *,
+    window: timedelta = timedelta(minutes=10),
+    required_families: frozenset[str] = frozenset({"ssh", "vpn", "web"}),
+) -> list[Alert]:
+    """Detect one user failing authentication across SSH, VPN, and web sources."""
+    if window.total_seconds() <= 0:
+        raise ValueError("window must be positive")
+    if not required_families:
+        raise ValueError("required_families must not be empty")
+
+    failures = []
+    for event in events:
+        if event.result != "failure":
+            continue
+        user = _event_user(event)
+        family = _source_family(event)
+        if user is not None and family in required_families:
+            failures.append((_utc_timestamp(event.ts), event, user, family))
+    failures.sort(key=lambda item: item[0])
+
+    windows: dict[str, deque[tuple[float, NormalizedEvent, str]]] = defaultdict(deque)
+    active_users: set[str] = set()
+    alerts: list[Alert] = []
+    window_seconds = window.total_seconds()
+
+    for timestamp, event, user, family in failures:
+        user_window = windows[user]
+        while user_window and timestamp - user_window[0][0] > window_seconds:
+            user_window.popleft()
+        existing_families = {item[2] for item in user_window}
+        if not required_families.issubset(existing_families):
+            active_users.discard(user)
+
+        user_window.append((timestamp, event, family))
+        observed_families = {item[2] for item in user_window}
+        if not required_families.issubset(observed_families) or user in active_users:
+            continue
+
+        matched_events = tuple(item[1] for item in user_window)
+        alerts.append(
+            _build_alert(
+                kind="credential_stuffing",
+                severity="high",
+                actor=user,
+                targets=(user,),
+                events=matched_events,
+                summary=(
+                    f"{user} failed authentication across "
+                    f"{', '.join(sorted(required_families))} within "
+                    f"{int(window_seconds)} seconds."
+                ),
+            )
+        )
+        active_users.add(user)
+
+    return alerts
+
+
 def correlate(events: list[NormalizedEvent]) -> list[Alert]:
     """Run all enabled correlation rules."""
-    return detect_brute_force(events)
+    alerts = [*detect_brute_force(events), *detect_credential_stuffing(events)]
+    return sorted(alerts, key=lambda alert: (_utc_timestamp(alert.first_seen), alert.kind, alert.id))

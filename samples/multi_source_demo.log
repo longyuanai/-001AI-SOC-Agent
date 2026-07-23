@@ -1,0 +1,17 @@
+{
+  "events": [
+    {"ts":"2026-07-24T01:00:00Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:00:20Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:00:40Z","actor":"203.0.113.45","action":"ssh_login","target":"admin","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:01:00Z","actor":"203.0.113.45","action":"ssh_login","target":"admin","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:01:20Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:01:40Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:02:00Z","actor":"203.0.113.45","action":"ssh_login","target":"administrator","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:02:20Z","actor":"203.0.113.45","action":"ssh_login","target":"administrator","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:02:40Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:03:00Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:05:00Z","actor":"198.51.100.10","action":"ssh_login","target":"victim@example.test","result":"failure","source":"sshd","extra":{}},
+    {"ts":"2026-07-24T01:06:00Z","actor":"198.51.100.11","action":"vpn_login","target":"victim@example.test","result":"failure","source":"vpn","extra":{}},
+    {"ts":"2026-07-24T01:07:00Z","actor":"198.51.100.12","action":"http_request","target":"/login","result":"failure","source":"nginx","extra":{"remote_user":"victim@example.test"}}
+  ]
+}
