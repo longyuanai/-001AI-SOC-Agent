@@ -12,6 +12,8 @@ python = "^3.11"
 shared-llm-core = { path = "../000shared-llm-core", develop = true }
 click = "^8.1.7"
 rich = "^13.7.1"
+fastapi = "0.139.2"
+uvicorn = "0.51.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"
