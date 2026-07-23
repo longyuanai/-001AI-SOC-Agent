@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Events xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <Event>
+    <System>
+      <EventID>4625</EventID>
+      <TimeCreated SystemTime="2026-07-24T01:02:03.456Z"/>
+      <Computer>dc01.example.test</Computer>
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">DC01$</Data>
+      <Data Name="TargetUserName">administrator</Data>
+      <Data Name="LogonType">3</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="IpAddress">203.0.113.45</Data>
+      <Data Name="IpPort">51234</Data>
+    </EventData>
+  </Event>
+  <Event>
+    <System>
+      <EventID>4624</EventID>
+      <TimeCreated SystemTime="2026-07-24T01:03:04Z"/>
+      <Computer>dc01.example.test</Computer>
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">SYSTEM</Data>
+      <Data Name="TargetUserName">alice</Data>
+      <Data Name="LogonType">10</Data>
+      <Data Name="AuthenticationPackageName">Negotiate</Data>
+      <Data Name="IpAddress">198.51.100.20</Data>
+      <Data Name="IpPort">51300</Data>
+    </EventData>
+  </Event>
+  <Event>
+    <System>
+      <EventID>4648</EventID>
+      <TimeCreated SystemTime="2026-07-24T01:04:05Z"/>
+      <Computer>workstation01.example.test</Computer>
+    </System>
+    <EventData>
+      <Data Name="SubjectUserName">alice</Data>
+      <Data Name="TargetUserName">svc-backup</Data>
+      <Data Name="TargetServerName">fileserver01</Data>
+      <Data Name="ProcessName">C:\Windows\System32\runas.exe</Data>
+      <Data Name="IpAddress">-</Data>
+      <Data Name="IpPort">-</Data>
+    </EventData>
+  </Event>
+</Events>

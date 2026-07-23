@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "ai-soc-agent"
+version = "0.1.0"
+description = "AI SOC log-analysis copilot — first project of the longyuanai suite"
+authors = ["longyuanai"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "ai_soc_agent", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+shared-llm-core = { path = "../000shared-llm-core", develop = true }
+click = "^8.1.7"
+rich = "^13.7.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+pytest-mock = "^3.14.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest-tmp"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

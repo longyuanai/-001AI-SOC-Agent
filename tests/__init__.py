@@ -1,0 +1,1 @@
+"""Marker so `pytest` discovers tests without extra config."""
