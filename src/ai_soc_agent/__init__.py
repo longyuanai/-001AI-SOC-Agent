@@ -6,6 +6,7 @@ shared LLM router, and print a structured Markdown report.
 """
 
 from ai_soc_agent.analyzer import analyze_events, AlertAssessment
+from ai_soc_agent.correlator import Alert, correlate
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.parsers import parse_line
 from ai_soc_agent.reporter import render_markdown
@@ -14,8 +15,10 @@ __version__ = "0.1.0"
 
 __all__ = [
     "AlertAssessment",
+    "Alert",
     "NormalizedEvent",
     "analyze_events",
+    "correlate",
     "parse_line",
     "render_markdown",
     "__version__",
