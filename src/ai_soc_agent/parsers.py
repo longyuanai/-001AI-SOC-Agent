@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,12 @@ _NGINX_COMBINED_RE = re.compile(
     r'(?P<status>\d{3})\s+(?P<bytes>\d+|-)\s+'
     r'"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"$'
 )
+
+_OKTA_EVENT_ACTIONS = {
+    "user.session.start": "okta_login",
+    "user.authentication.auth_via_mfa": "okta_mfa",
+    "user.authentication.sso": "okta_sso",
+}
 
 
 def _parse_ts(token: str, year: int | None = None) -> datetime:
@@ -230,6 +237,86 @@ def parse_nginx_line(line: str) -> NormalizedEvent | None:
     )
 
 
+def parse_okta_record(record: dict) -> NormalizedEvent | None:
+    """Parse one Okta System Log login/authentication record."""
+    event_type = record.get("eventType")
+    if event_type not in _OKTA_EVENT_ACTIONS:
+        return None
+
+    published = record.get("published")
+    if not isinstance(published, str) or (ts := _parse_iso_datetime(published)) is None:
+        return None
+
+    actor_data = record.get("actor")
+    actor_data = actor_data if isinstance(actor_data, dict) else {}
+    client = record.get("client")
+    client = client if isinstance(client, dict) else {}
+    outcome = record.get("outcome")
+    outcome = outcome if isinstance(outcome, dict) else {}
+    auth_context = record.get("authenticationContext")
+    auth_context = auth_context if isinstance(auth_context, dict) else {}
+
+    user = (
+        actor_data.get("alternateId")
+        or actor_data.get("displayName")
+        or actor_data.get("id")
+        or ""
+    )
+    targets = record.get("target")
+    first_target = (
+        targets[0]
+        if isinstance(targets, list) and targets and isinstance(targets[0], dict)
+        else {}
+    )
+    target = (
+        user
+        or first_target.get("alternateId")
+        or first_target.get("displayName")
+        or first_target.get("id")
+        or "unknown"
+    )
+    actor = client.get("ipAddress") or user or "unknown"
+
+    outcome_result = str(outcome.get("result", "")).upper()
+    if outcome_result == "SUCCESS":
+        result = "success"
+    elif outcome_result == "FAILURE":
+        result = "failure"
+    else:
+        result = "unknown"
+
+    user_agent_data = client.get("userAgent")
+    if isinstance(user_agent_data, dict):
+        user_agent = user_agent_data.get("rawUserAgent", "")
+    else:
+        user_agent = user_agent_data if isinstance(user_agent_data, str) else ""
+
+    extra = {
+        "event_id": record.get("uuid", ""),
+        "event_type": event_type,
+        "user": user,
+        "display_message": record.get("displayMessage", ""),
+        "outcome_reason": outcome.get("reason", ""),
+        "user_agent": user_agent,
+        "authentication_provider": auth_context.get("authenticationProvider", ""),
+        "credential_type": auth_context.get("credentialType", ""),
+    }
+    return NormalizedEvent(
+        ts=ts,
+        actor=str(actor),
+        action=_OKTA_EVENT_ACTIONS[event_type],
+        target=str(target),
+        result=result,
+        source="okta",
+        raw=json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        extra={
+            key: value
+            for key, value in extra.items()
+            if value not in ("", None)
+        },
+    )
+
+
 def _parse_evtx_file(path: str) -> list[NormalizedEvent]:
     content = Path(path).read_text(encoding="utf-8-sig", errors="replace")
     if not content.strip():
@@ -256,10 +343,43 @@ def _parse_evtx_file(path: str) -> list[NormalizedEvent]:
     ]
 
 
+def _parse_okta_file(path: str) -> list[NormalizedEvent]:
+    content = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    if not content.strip():
+        return []
+
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        records = []
+        for line in content.splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    else:
+        if isinstance(payload, list):
+            records = [record for record in payload if isinstance(record, dict)]
+        elif isinstance(payload, dict):
+            records = [payload]
+        else:
+            records = []
+
+    return [
+        event
+        for record in records
+        if (event := parse_okta_record(record)) is not None
+    ]
+
+
 def parse_file(path: str, *, log_type: str = "sshd") -> list[NormalizedEvent]:
     """Parse a whole file using the selected log format."""
     if log_type == "evtx":
         return _parse_evtx_file(path)
+    if log_type == "okta":
+        return _parse_okta_file(path)
     line_parsers = {
         "sshd": parse_line,
         "nginx": parse_nginx_line,

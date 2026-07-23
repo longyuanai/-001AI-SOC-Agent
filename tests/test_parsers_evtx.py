@@ -91,8 +91,9 @@ def test_parse_evtx_rejects_unsupported_or_malformed_records():
 
 def test_parse_evtx_file_reads_namespaced_event_container(tmp_path):
     path = tmp_path / "events.xml"
+    ip_data = '<Data Name="IpAddress">1.2.3.4</Data>'
     path.write_text(
-        f"<Events>{_event_xml(4625, '<Data Name=\"IpAddress\">1.2.3.4</Data>')}"
+        f"<Events>{_event_xml(4625, ip_data)}"
         f"{_event_xml(9999, '')}</Events>",
         encoding="utf-8",
     )
