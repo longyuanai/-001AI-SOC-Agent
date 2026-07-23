@@ -60,6 +60,26 @@ poetry run pytest -v
 
 All tests use a stubbed router; no live LLM is required.
 
+## API server
+
+Run the webhook API locally:
+
+```bash
+python -m ai_soc_agent.server
+curl -H "Content-Type: application/json" \
+  --data-binary @samples/multi_source_demo.log \
+  http://127.0.0.1:8080/ingest
+curl http://127.0.0.1:8080/alerts
+```
+
+The Docker build needs both this project and its sibling `000shared-llm-core`
+path dependency. Run it from their common `003AI+网络安全` parent directory:
+
+```bash
+docker build -f 001AI-SOC-Agent/Dockerfile -t ai-soc-agent:0.1 .
+docker run --rm -p 8080:8080 ai-soc-agent:0.1
+```
+
 ## Repo layout
 
 ```
