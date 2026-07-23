@@ -39,6 +39,14 @@ _WINDOWS_EVENT_ACTIONS = {
     4648: "windows_explicit_credentials",
 }
 
+_NGINX_COMBINED_RE = re.compile(
+    r'^(?P<ip>\S+)\s+(?P<ident>\S+)\s+(?P<user>\S+)\s+'
+    r'\[(?P<ts>[^\]]+)\]\s+'
+    r'"(?P<method>\S+)\s+(?P<request>\S+)(?:\s+(?P<protocol>[^"]+))?"\s+'
+    r'(?P<status>\d{3})\s+(?P<bytes>\d+|-)\s+'
+    r'"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"$'
+)
+
 
 def _parse_ts(token: str, year: int | None = None) -> datetime:
     """Parse 'Mon DD HH:MM:SS' into a datetime; year defaults to current."""
@@ -176,6 +184,52 @@ def parse_evtx_line(line: str) -> NormalizedEvent | None:
     return _parse_evtx_element(root, raw=raw)
 
 
+def parse_nginx_line(line: str) -> NormalizedEvent | None:
+    """Parse one Nginx combined access-log line."""
+    raw = line.rstrip("\r\n")
+    match = _NGINX_COMBINED_RE.match(raw)
+    if match is None:
+        return None
+
+    try:
+        ts = datetime.strptime(match.group("ts"), "%d/%b/%Y:%H:%M:%S %z")
+    except ValueError:
+        return None
+
+    status = int(match.group("status"))
+    if 100 <= status < 400:
+        result = "success"
+    elif 400 <= status < 600:
+        result = "failure"
+    else:
+        result = "unknown"
+
+    bytes_sent = match.group("bytes")
+    extra = {
+        "method": match.group("method"),
+        "status": status,
+        "bytes_sent": None if bytes_sent == "-" else int(bytes_sent),
+        "protocol": match.group("protocol") or "",
+        "remote_user": match.group("user"),
+        "referer": match.group("referer"),
+        "user_agent": match.group("user_agent"),
+    }
+    return NormalizedEvent(
+        ts=ts,
+        actor=match.group("ip"),
+        action="http_request",
+        target=match.group("request"),
+        result=result,
+        source="nginx",
+        raw=raw,
+        extra={
+            key: value
+            for key, value in extra.items()
+            if value not in ("", "-")
+        },
+    )
+
+
 def _parse_evtx_file(path: str) -> list[NormalizedEvent]:
     content = Path(path).read_text(encoding="utf-8-sig", errors="replace")
     if not content.strip():
@@ -206,15 +260,20 @@ def parse_file(path: str, *, log_type: str = "sshd") -> list[NormalizedEvent]:
     """Parse a whole file using the selected log format."""
     if log_type == "evtx":
         return _parse_evtx_file(path)
-    if log_type != "sshd":
+    line_parsers = {
+        "sshd": parse_line,
+        "nginx": parse_nginx_line,
+    }
+    if log_type not in line_parsers:
         raise ValueError(f"Unsupported log type: {log_type}")
 
     events: list[NormalizedEvent] = []
+    parser = line_parsers[log_type]
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
             if not line.strip():
                 continue
-            ev = parse_line(line)
+            ev = parser(line)
             if ev is not None:
                 events.append(ev)
     return events

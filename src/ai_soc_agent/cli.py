@@ -27,7 +27,7 @@ def cli() -> None:
 @click.option("--output", "-o", "output_path", default="-", type=click.Path())
 @click.option(
     "--log-type",
-    type=click.Choice(["sshd", "evtx"], case_sensitive=False),
+    type=click.Choice(["sshd", "evtx", "nginx"], case_sensitive=False),
     default="sshd",
     show_default=True,
     help="Input log format.",

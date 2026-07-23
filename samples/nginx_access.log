@@ -1,0 +1,3 @@
+203.0.113.45 - - [24/Jul/2026:09:15:01 +0800] "GET /login HTTP/1.1" 200 1842 "https://portal.example.test/" "Mozilla/5.0"
+203.0.113.45 - - [24/Jul/2026:09:15:03 +0800] "POST /api/session HTTP/1.1" 401 97 "https://portal.example.test/login" "python-requests/2.32.0"
+198.51.100.20 - alice [24/Jul/2026:09:16:10 +0800] "GET /admin?view=users HTTP/2.0" 403 153 "-" "Mozilla/5.0"

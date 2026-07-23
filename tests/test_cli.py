@@ -39,3 +39,4 @@ def test_cli_analyze_help_lists_evtx_log_type():
     assert "--log-type" in res.output
     assert "sshd" in res.output
     assert "evtx" in res.output
+    assert "nginx" in res.output
