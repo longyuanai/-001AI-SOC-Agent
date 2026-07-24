@@ -6,6 +6,7 @@ import json
 import sys
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import click
@@ -56,12 +57,25 @@ def _normalized_event(item: dict[str, Any], source: str) -> NormalizedEvent | No
     )
 
 
-def _payload_events(payload: dict[str, Any]) -> tuple[list[NormalizedEvent], int]:
+def _payload_events(
+    payload: dict[str, Any], *, log_file: str | None = None
+) -> tuple[list[NormalizedEvent], int]:
     source = str(payload.get("source", "sshd")).casefold()
     if source not in _LOG_TYPES:
         raise click.ClickException(
             f"unsupported source {source!r}; expected one of {', '.join(_LOG_TYPES)}"
         )
+
+    requested_file = log_file or payload.get("log_file") or payload.get("path")
+    if requested_file is not None:
+        if not isinstance(requested_file, str):
+            raise click.ClickException("payload log file path must be a string")
+        path = Path(requested_file)
+        if not path.is_file():
+            raise click.ClickException(f"log file does not exist: {requested_file}")
+        parsed = parse_file(str(path), log_type=source)
+        threshold = _brute_force_threshold(payload)
+        return parsed, threshold
 
     raw_events = payload.get("events", [])
     if not isinstance(raw_events, list):
@@ -84,10 +98,14 @@ def _payload_events(payload: dict[str, Any]) -> tuple[list[NormalizedEvent], int
         if event is not None:
             parsed.append(event)
 
+    return parsed, _brute_force_threshold(payload)
+
+
+def _brute_force_threshold(payload: dict[str, Any]) -> int:
     threshold = payload.get("brute_force_threshold", 5)
     if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
         raise click.ClickException("'brute_force_threshold' must be a positive integer")
-    return parsed, threshold
+    return threshold
 
 
 def _parse_raw_event(raw: str, source: str) -> NormalizedEvent | None:
@@ -125,9 +143,11 @@ def _alert_finding(alert: Any) -> dict[str, Any]:
     }
 
 
-def scan_payload(payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def scan_payload(
+    payload: dict[str, Any], *, log_file: str | None = None
+) -> dict[str, list[dict[str, Any]]]:
     """Convert an IntegrationGateway payload into its Finding envelope."""
-    events, threshold = _payload_events(payload)
+    events, threshold = _payload_events(payload, log_file=log_file)
     alerts = [
         *detect_brute_force(events, threshold=threshold),
         *detect_credential_stuffing(events),
@@ -147,22 +167,32 @@ def cli() -> None:
     "input_json",
     help="IntegrationGateway JSON payload; reads stdin when omitted.",
 )
+@click.option(
+    "--log-file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Read events from a real log file; source defaults to sshd.",
+)
 @click.option("--json", "json_output", is_flag=True, help="Emit a Finding JSON envelope.")
-def scan(input_json: str | None, json_output: bool) -> None:
+def scan(input_json: str | None, log_file: str | None, json_output: bool) -> None:
     """Scan normalized or raw events without calling an LLM."""
-    raw_payload = input_json if input_json is not None else sys.stdin.read()
-    if not raw_payload.strip():
-        raise click.ClickException("missing JSON payload: use --input or stdin")
-    try:
-        payload = json.loads(raw_payload)
-    except json.JSONDecodeError as exc:
-        raise click.ClickException(
-            f"invalid JSON payload at line {exc.lineno}, column {exc.colno}"
-        ) from exc
+    raw_payload = input_json
+    if raw_payload is None and log_file is None:
+        raw_payload = sys.stdin.read()
+    if raw_payload is None:
+        payload: Any = {}
+    elif not raw_payload.strip():
+        raise click.ClickException("missing JSON payload: use --input, --log-file, or stdin")
+    else:
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(
+                f"invalid JSON payload at line {exc.lineno}, column {exc.colno}"
+            ) from exc
     if not isinstance(payload, dict):
         raise click.ClickException("JSON payload must be an object")
 
-    envelope = scan_payload(payload)
+    envelope = scan_payload(payload, log_file=log_file)
     if json_output:
         click.echo(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
         return
@@ -221,7 +251,10 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
 def main() -> None:
     args = sys.argv[1:]
     if args and args[0].startswith("-") and any(
-        arg == "--json" or arg == "--input" or arg.startswith("--input=") for arg in args
+        arg in {"--json", "--input", "--log-file"}
+        or arg.startswith("--input=")
+        or arg.startswith("--log-file=")
+        for arg in args
     ):
         args.insert(0, "scan")
     cli.main(args=args, prog_name="python -m ai_soc_agent.cli")

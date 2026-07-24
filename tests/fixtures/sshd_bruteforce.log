@@ -1,0 +1,6 @@
+Jul 24 01:00:00 soc-host sshd[1200]: Failed password for root from 203.0.113.45 port 51000 ssh2
+Jul 24 01:00:10 soc-host sshd[1201]: Failed password for root from 203.0.113.45 port 51001 ssh2
+Jul 24 01:00:20 soc-host sshd[1202]: Failed password for root from 203.0.113.45 port 51002 ssh2
+Jul 24 01:00:30 soc-host sshd[1203]: Failed password for root from 203.0.113.45 port 51003 ssh2
+Jul 24 01:00:40 soc-host sshd[1204]: Failed password for root from 203.0.113.45 port 51004 ssh2
+Jul 24 01:00:50 soc-host sshd[1205]: Accepted password for root from 198.51.100.20 port 52000 ssh2

@@ -80,6 +80,32 @@ docker build -f 001AI-SOC-Agent/Dockerfile -t ai-soc-agent:0.1 .
 docker run --rm -p 8080:8080 ai-soc-agent:0.1
 ```
 
+## Called by IntegrationGateway
+
+The shared gateway invokes this product through an isolated JSON subprocess.
+The public adapter envelope deliberately omits `source`; `SOCAdapter` injects
+the frozen `FindingSource.SOC` value (`"001"`) before registry insertion.
+
+```bash
+echo '{"source":"sshd","events":[]}' | \
+  python -m ai_soc_agent.cli scan --json
+# {"findings":[]}
+
+python -m ai_soc_agent.cli scan \
+  --log-file tests/fixtures/sshd_bruteforce.log --json
+```
+
+Start the suite gateway from `000shared-integration`, then use the frozen
+Finding source value in the route:
+
+```bash
+python -m shared_integration.gateway
+curl http://127.0.0.1:8080/v0.5/health
+curl -H "Content-Type: application/json" \
+  --data-binary '{"source":"sshd","log_file":"E:/path/to/sshd_bruteforce.log"}' \
+  http://127.0.0.1:8080/v0.5/001/scan
+```
+
 ## Repo layout
 
 ```
