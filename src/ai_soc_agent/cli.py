@@ -2,18 +2,137 @@
 
 from __future__ import annotations
 
+import json
 import sys
+import uuid
+from datetime import datetime
+from typing import Any
 
 import click
 from rich.console import Console
 
 from ai_soc_agent import __version__
 from ai_soc_agent.analyzer import analyze_events
+from ai_soc_agent.correlator import detect_brute_force, detect_credential_stuffing
 from ai_soc_agent.normalizer import NormalizedEvent
-from ai_soc_agent.parsers import parse_file
+from ai_soc_agent.parsers import (
+    parse_evtx_line,
+    parse_file,
+    parse_line,
+    parse_nginx_line,
+    parse_okta_record,
+)
 from ai_soc_agent.reporter import render_markdown
 
 console = Console()
+_LOG_TYPES = ("sshd", "evtx", "nginx", "okta")
+
+
+def _parse_timestamp(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise click.ClickException("normalized event 'ts' must be an ISO-8601 string")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise click.ClickException(f"invalid normalized event timestamp: {value}") from exc
+
+
+def _normalized_event(item: dict[str, Any], source: str) -> NormalizedEvent | None:
+    required = {"ts", "actor", "action", "target", "result"}
+    if not required.issubset(item):
+        return None
+    extra = item.get("extra", {})
+    if not isinstance(extra, dict):
+        raise click.ClickException("normalized event 'extra' must be an object")
+    return NormalizedEvent(
+        ts=_parse_timestamp(item["ts"]),
+        actor=str(item["actor"]),
+        action=str(item["action"]),
+        target=str(item["target"]),
+        result=str(item["result"]),
+        source=str(item.get("source", source)),
+        raw=str(item.get("raw", "")),
+        extra=extra,
+    )
+
+
+def _payload_events(payload: dict[str, Any]) -> tuple[list[NormalizedEvent], int]:
+    source = str(payload.get("source", "sshd")).casefold()
+    if source not in _LOG_TYPES:
+        raise click.ClickException(
+            f"unsupported source {source!r}; expected one of {', '.join(_LOG_TYPES)}"
+        )
+
+    raw_events = payload.get("events", [])
+    if not isinstance(raw_events, list):
+        raise click.ClickException("payload 'events' must be a list")
+
+    parsed: list[NormalizedEvent] = []
+    for item in raw_events:
+        event: NormalizedEvent | None
+        if isinstance(item, dict):
+            event = _normalized_event(item, source)
+            if event is None and source == "okta":
+                event = parse_okta_record(item)
+            elif event is None:
+                raw = item.get("raw")
+                event = _parse_raw_event(raw, source) if isinstance(raw, str) else None
+        elif isinstance(item, str):
+            event = _parse_raw_event(item, source)
+        else:
+            event = None
+        if event is not None:
+            parsed.append(event)
+
+    threshold = payload.get("brute_force_threshold", 5)
+    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
+        raise click.ClickException("'brute_force_threshold' must be a positive integer")
+    return parsed, threshold
+
+
+def _parse_raw_event(raw: str, source: str) -> NormalizedEvent | None:
+    if source == "sshd":
+        return parse_line(raw)
+    if source == "evtx":
+        return parse_evtx_line(raw)
+    if source == "nginx":
+        return parse_nginx_line(raw)
+    if source == "okta":
+        try:
+            record = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return parse_okta_record(record) if isinstance(record, dict) else None
+    return None
+
+
+def _alert_finding(alert: Any) -> dict[str, Any]:
+    if alert.kind == "brute_force":
+        title = f"Brute force from {alert.actor}"
+        confidence = 0.92
+    else:
+        title = f"Credential stuffing for {alert.actor}"
+        confidence = 0.88
+    return {
+        "id": str(uuid.uuid4()),
+        "severity": alert.severity,
+        "confidence": confidence,
+        "title": title,
+        "description": alert.summary,
+        "host": alert.actor,
+        "ts": alert.last_seen.isoformat(),
+        "evidence": [alert.id],
+    }
+
+
+def scan_payload(payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Convert an IntegrationGateway payload into its Finding envelope."""
+    events, threshold = _payload_events(payload)
+    alerts = [
+        *detect_brute_force(events, threshold=threshold),
+        *detect_credential_stuffing(events),
+    ]
+    return {"findings": [_alert_finding(alert) for alert in alerts]}
 
 
 @click.group()
@@ -23,11 +142,42 @@ def cli() -> None:
 
 
 @cli.command()
+@click.option(
+    "--input",
+    "input_json",
+    help="IntegrationGateway JSON payload; reads stdin when omitted.",
+)
+@click.option("--json", "json_output", is_flag=True, help="Emit a Finding JSON envelope.")
+def scan(input_json: str | None, json_output: bool) -> None:
+    """Scan normalized or raw events without calling an LLM."""
+    raw_payload = input_json if input_json is not None else sys.stdin.read()
+    if not raw_payload.strip():
+        raise click.ClickException("missing JSON payload: use --input or stdin")
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(
+            f"invalid JSON payload at line {exc.lineno}, column {exc.colno}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise click.ClickException("JSON payload must be an object")
+
+    envelope = scan_payload(payload)
+    if json_output:
+        click.echo(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
+        return
+
+    click.echo(f"{len(envelope['findings'])} finding(s)")
+    for finding in envelope["findings"]:
+        click.echo(f"- [{finding['severity']}] {finding['title']}")
+
+
+@cli.command()
 @click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True))
 @click.option("--output", "-o", "output_path", default="-", type=click.Path())
 @click.option(
     "--log-type",
-    type=click.Choice(["sshd", "evtx", "nginx", "okta"], case_sensitive=False),
+    type=click.Choice(_LOG_TYPES, case_sensitive=False),
     default="sshd",
     show_default=True,
     help="Input log format.",
@@ -69,7 +219,12 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
 
 
 def main() -> None:
-    cli()
+    args = sys.argv[1:]
+    if args and args[0].startswith("-") and any(
+        arg == "--json" or arg == "--input" or arg.startswith("--input=") for arg in args
+    ):
+        args.insert(0, "scan")
+    cli.main(args=args, prog_name="python -m ai_soc_agent.cli")
 
 
 if __name__ == "__main__":
