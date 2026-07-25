@@ -34,13 +34,19 @@
 | FIX-010 | CI + 依赖声明 | done | `.github/workflows/ci.yml`；httpx / ruff / pyyaml 进 pyproject |
 | FIX-011 | 混合时区批次崩溃 | done | `detect_patterns` 里 min/max 前统一按 UTC 归一 |
 | FIX-012 | AUDIT S1 nit 1/2/3 全部清掉 | done | `--basetemp` 去掉；cli 顶层 import；`--log-type` 显式 |
+| FIX-013 | nginx Web 登录爆破不可见 | done | `is_login_endpoint` + 只认 POST/PUT/PATCH → `action="web_login"`，T1110 覆盖 Web |
+| FIX-014 | sshd 只认 password 认证 | done | `Failed`/`Accepted` 泛化到任意 auth method，`extra.auth_method` 记录 |
+| FIX-015 | syslog 缺年份导致跨年断窗 | done | `_parse_ts` 按 `now` 推断年份，未来 >1 天读作去年 |
 
 ### 已知未闭环
 
 - `tests/integration/` 与 `tests/test_cli_envelope.py` 依赖 `000shared-integration`，
   只 clone 本仓库时 skip。CI 里靠 `SHARED_INTEGRATION_REPO` 变量启用。
-- nginx / okta 的 401 事件 `action` 是 `http_request`，不含 `login`，因此不会触发
-  T1110。要覆盖 Web 登录爆破需要在解析器里区分登录端点，留到 v0.6。
+- sshd 的 `Invalid user X from IP` 行**故意不解析**：sshd 通常同时打这一行和
+  `Failed password for invalid user X`，两条都收会把失败次数翻倍、等效把阈值砍半。
+  要用它需要先做同一次认证尝试的去重（按 pid + 时间聚合），留到 v0.6。
+- nginx 登录端点靠路径 + 动词启发式判断（`config` 之外的
+  `parsers._LOGIN_SEGMENTS`）。自定义登录路径需要配置化，留到 v0.6。
 
 ---
 

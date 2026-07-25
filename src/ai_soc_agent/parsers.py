@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -19,13 +19,17 @@ _SSHD_RE = re.compile(
     r"(?P<msg>.+)$"
 )
 
-_FAILED_PASSWORD_RE = re.compile(
-    r"Failed password for(?: invalid user)?\s+(?P<user>\S+)\s+"
+# Any auth method, not just "password": a key-only server logs "Failed publickey
+# for root from ...", which the password-only patterns dropped on the floor, so
+# key-probing bursts were invisible to T1110.
+_FAILED_AUTH_RE = re.compile(
+    r"Failed (?P<method>\S+) for(?: invalid user)?\s+(?P<user>\S+)\s+"
     r"from\s+(?P<ip>\S+)\s+port\s+(?P<port>\d+)"
 )
 
-_ACCEPTED_PASSWORD_RE = re.compile(
-    r"Accepted password for\s+(?P<user>\S+)\s+from\s+(?P<ip>\S+)\s+port\s+(?P<port>\d+)"
+_ACCEPTED_AUTH_RE = re.compile(
+    r"Accepted (?P<method>\S+) for\s+(?P<user>\S+)\s+"
+    r"from\s+(?P<ip>\S+)\s+port\s+(?P<port>\d+)"
 )
 
 _WINDOWS_EVENT_RESULTS = {
@@ -48,6 +52,34 @@ _NGINX_COMBINED_RE = re.compile(
     r'"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"$'
 )
 
+# Path segments that mean "this request is an authentication attempt". Needed
+# because every nginx event used to be action="http_request", which contains no
+# "login" token, so T1110 could never fire on web brute force.
+_LOGIN_SEGMENTS = frozenset(
+    {
+        "auth",
+        "authenticate",
+        "login",
+        "log-in",
+        "logon",
+        "oauth",
+        "session",
+        "sessions",
+        "signin",
+        "sign-in",
+        "sso",
+        "token",
+    }
+)
+
+#: Only these verbs submit credentials; GET /login is just loading the form.
+_AUTH_METHODS = frozenset({"POST", "PUT", "PATCH"})
+
+#: Static assets never authenticate, whatever they are named (login.css).
+_STATIC_SUFFIXES = frozenset(
+    {"css", "js", "map", "png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf"}
+)
+
 _OKTA_EVENT_ACTIONS = {
     "user.session.start": "okta_login",
     "user.authentication.auth_via_mfa": "okta_mfa",
@@ -55,14 +87,34 @@ _OKTA_EVENT_ACTIONS = {
 }
 
 
-def _parse_ts(token: str, year: int | None = None) -> datetime:
-    """Parse 'Mon DD HH:MM:SS' into a datetime; year defaults to current."""
-    if year is None:
-        year = datetime.now().year
-    return datetime.strptime(f"{year} {token}", "%Y %b %d %H:%M:%S")
+def _parse_ts(
+    token: str, year: int | None = None, *, now: datetime | None = None
+) -> datetime:
+    """Parse 'Mon DD HH:MM:SS' into a datetime, inferring the omitted year.
+
+    Syslog carries no year. Blindly stamping on the current one puts a December
+    log read in January eleven months in the *future*, which silently splits
+    every correlation window that straddles New Year. Dates more than a day
+    ahead of ``now`` are therefore read as last year's.
+    """
+    if year is not None:
+        return datetime.strptime(f"{year} {token}", "%Y %b %d %H:%M:%S")
+
+    reference = now or datetime.now()
+    parsed = datetime.strptime(f"{reference.year} {token}", "%Y %b %d %H:%M:%S")
+    if parsed - reference <= timedelta(days=1):
+        return parsed
+    try:
+        return parsed.replace(year=reference.year - 1)
+    except ValueError:
+        # Feb 29 with a non-leap previous year: the log cannot be from last
+        # year, so the current-year reading was right after all.
+        return parsed
 
 
-def parse_line(line: str, *, year: int | None = None) -> NormalizedEvent | None:
+def parse_line(
+    line: str, *, year: int | None = None, now: datetime | None = None
+) -> NormalizedEvent | None:
     """Parse one log line. Returns None if the line doesn't match a known format."""
     line = line.rstrip("\n")
     m = _SSHD_RE.match(line)
@@ -70,31 +122,25 @@ def parse_line(line: str, *, year: int | None = None) -> NormalizedEvent | None:
         return None
 
     msg = m.group("msg")
-    ts = _parse_ts(m.group("ts"), year=year)
+    ts = _parse_ts(m.group("ts"), year=year, now=now)
     host = m.group("host")
 
-    if (fm := _FAILED_PASSWORD_RE.search(msg)):
+    for pattern, result in ((_FAILED_AUTH_RE, "failure"), (_ACCEPTED_AUTH_RE, "success")):
+        if (match := pattern.search(msg)) is None:
+            continue
         return NormalizedEvent(
             ts=ts,
-            actor=fm.group("ip"),
+            actor=match.group("ip"),
             action="ssh_login",
-            target=fm.group("user"),
-            result="failure",
+            target=match.group("user"),
+            result=result,
             source="sshd",
             raw=line,
-            extra={"host": host, "port": int(fm.group("port"))},
-        )
-
-    if (am := _ACCEPTED_PASSWORD_RE.search(msg)):
-        return NormalizedEvent(
-            ts=ts,
-            actor=am.group("ip"),
-            action="ssh_login",
-            target=am.group("user"),
-            result="success",
-            source="sshd",
-            raw=line,
-            extra={"host": host, "port": int(am.group("port"))},
+            extra={
+                "host": host,
+                "port": int(match.group("port")),
+                "auth_method": match.group("method").casefold(),
+            },
         )
 
     return None
@@ -191,6 +237,24 @@ def parse_evtx_line(line: str) -> NormalizedEvent | None:
     return _parse_evtx_element(root, raw=raw)
 
 
+def is_login_endpoint(request: str) -> bool:
+    """Return whether a request target looks like an authentication endpoint."""
+    path = request.split("?", 1)[0].split("#", 1)[0]
+    segments = [segment.casefold() for segment in path.split("/") if segment]
+    if not segments:
+        return False
+
+    last = segments[-1]
+    stem, _, suffix = last.rpartition(".")
+    if stem and suffix in _STATIC_SUFFIXES:
+        return False
+
+    if any(segment in _LOGIN_SEGMENTS for segment in segments):
+        return True
+    # wp-login.php, user_login.jsp, doSignin.do, ...
+    return any(token in (stem or last) for token in ("login", "signin", "logon"))
+
+
 def parse_nginx_line(line: str) -> NormalizedEvent | None:
     """Parse one Nginx combined access-log line."""
     raw = line.rstrip("\r\n")
@@ -211,9 +275,13 @@ def parse_nginx_line(line: str) -> NormalizedEvent | None:
     else:
         result = "unknown"
 
+    method = match.group("method")
+    request = match.group("request")
+    is_login = method.upper() in _AUTH_METHODS and is_login_endpoint(request)
+
     bytes_sent = match.group("bytes")
     extra = {
-        "method": match.group("method"),
+        "method": method,
         "status": status,
         "bytes_sent": None if bytes_sent == "-" else int(bytes_sent),
         "protocol": match.group("protocol") or "",
@@ -224,16 +292,12 @@ def parse_nginx_line(line: str) -> NormalizedEvent | None:
     return NormalizedEvent(
         ts=ts,
         actor=match.group("ip"),
-        action="http_request",
-        target=match.group("request"),
+        action="web_login" if is_login else "http_request",
+        target=request,
         result=result,
         source="nginx",
         raw=raw,
-        extra={
-            key: value
-            for key, value in extra.items()
-            if value not in ("", "-")
-        },
+        extra={key: value for key, value in extra.items() if value not in ("", "-")},
     )
 
 

@@ -11,8 +11,9 @@ from datetime import UTC, datetime, timedelta
 
 from shared_llm_core.finding import Finding, FindingSeverity, FindingSource
 
-from ai_soc_agent.correlator import correlate, finding_to_alert
+from ai_soc_agent.correlator import correlate, detect_patterns, finding_to_alert
 from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.parsers import parse_nginx_line
 
 START = datetime(2026, 7, 24, 1, 0, tzinfo=UTC)
 
@@ -266,3 +267,48 @@ def test_finding_without_alert_metadata_degrades_instead_of_disappearing():
     assert alert.actor == "10.0.0.9"
     assert alert.event_count == 2
     assert alert.first_seen == START
+
+
+def _nginx_login_failures(ip: str, count: int = 5) -> list[NormalizedEvent]:
+    return [
+        parse_nginx_line(
+            f'{ip} - - [24/Jul/2026:09:15:{index:02d} +0800] '
+            f'"POST /login HTTP/1.1" 401 97 "-" "curl/8"'
+        )
+        for index in range(count)
+    ]
+
+
+def test_web_login_brute_force_is_detected_end_to_end():
+    """nginx events were all action=http_request, so T1110 never saw them."""
+    findings = detect_patterns(_nginx_login_failures("203.0.113.45"))
+
+    assert len(findings) == 1
+    assert findings[0].metadata["alert_kind"] == "brute_force"
+    assert findings[0].host == "203.0.113.45"
+
+
+def test_browsing_a_site_is_not_a_web_brute_force():
+    events = [
+        parse_nginx_line(
+            f'203.0.113.45 - - [24/Jul/2026:09:15:{index:02d} +0800] '
+            f'"GET /login HTTP/1.1" 200 1842 "-" "Mozilla/5.0"'
+        )
+        for index in range(10)
+    ]
+
+    assert detect_patterns(events) == []
+
+
+def test_web_brute_force_reports_each_source_ip():
+    events = [
+        *_nginx_login_failures("203.0.113.45"),
+        *_nginx_login_failures("198.51.100.20"),
+    ]
+
+    findings = detect_patterns(events)
+
+    assert sorted(finding.host for finding in findings) == [
+        "198.51.100.20",
+        "203.0.113.45",
+    ]

@@ -2,7 +2,7 @@
 
 **审计日期**: 2026-07-25
 **审计人**: Claude
-**范围**: 全仓库缺陷诊断后的修复批次 (FIX-001 ~ FIX-012，见 `docs/TODO.md`)
+**范围**: 全仓库缺陷诊断后的修复批次 (FIX-001 ~ FIX-015，见 `docs/TODO.md`)
 
 ---
 
@@ -14,8 +14,8 @@
 |---|----|------|------|
 | 1 | 接口契约 | PASS | 未改 `000shared-llm-core`；只消费 `Finding` / `Rule` / `RuleContext` / `RuleEngine` / `RuleRegistry` / `LLMRouter`，无新增依赖面 |
 | 2 | 技术方案 | PASS | `docs/tech-spec.md` 未改；`docs/TODO.md` 从"全 pending"更新为真实状态 |
-| 3 | 测试 | PASS | 141 passed + 4 skipped(跨仓库用例)。修复前为 12 个 collection error(缺 sibling 仓库) |
-| 4 | CLI smoke | PASS | `scan` / `--log-type` / bare-option 分发 / 多 actor 多 finding 全部实测通过 |
+| 3 | 测试 | PASS | 168 passed + 4 skipped(跨仓库用例)。修复前为 12 个 collection error(缺 sibling 仓库) |
+| 4 | CLI smoke | PASS | `scan` / `--log-type` / bare-option 分发 / 多 actor 多 finding / nginx Web 爆破全部实测通过 |
 | 5 | 跨项目隔离 | PASS | 仅改动本仓库 |
 | 6 | 依赖管理 | PASS | 新增 `pyyaml`(prompt 加载)、dev 的 `httpx`(测试已在用但未声明)、`ruff`(已配置但未声明) |
 | 7 | 代码质量 | PASS | `ruff check src tests` 全绿；无 hardcoded 凭据；Dockerfile 无 `ENV`/`ARG` 形式的密钥 |
@@ -43,6 +43,25 @@
 - **死代码**: `detect_brute_force` / `detect_credential_stuffing` 约 150 行无人调用，
   但 `test_correlator.py` / `test_credential_stuffing.py` 在测它们 —— 覆盖率好看、
   实际生产路径无覆盖。已删除，测试改测 `correlate()`。
+
+## 解析器复查（第二轮，`parsers.py` 399 行首轮未细读）
+
+- **Web 登录爆破完全不可见**: nginx 事件的 `action` 恒为 `http_request`，不含
+  `login` token，因此 T1110 永远不会在 Web 日志上触发 —— 对一个 SOC 产品来说是
+  整类攻击的盲区。新增 `is_login_endpoint()`：路径命中认证段（login / signin /
+  session / oauth / token ...）**且**动词是 POST/PUT/PATCH 才记为 `web_login`。
+  `GET /login` 是加载表单不是认证尝试，静态资源（`/static/login.css`）排除。
+- **sshd 只认 password**: `Failed password` / `Accepted password` 写死，
+  `Failed publickey` 被静默丢弃。纯密钥认证的服务器上，撞私钥的爆破一条都看不到。
+  已泛化到任意 auth method，并把方法名记进 `extra.auth_method`，便于区分
+  密码喷洒和密钥探测。
+- **syslog 跨年断窗**: `_parse_ts` 用 `datetime.now().year` 盖章。1 月读 12 月的
+  日志会把事件放到 11 个月后的未来，跨年那一刻的爆破被拆成相隔一年的两半，
+  任何时间窗都不会触发。已改为按参考时刻推断：未来超过 1 天的读作去年。
+  Feb 29 落到非闰年时保留当年读数。
+- **`Invalid user X from IP` 刻意不解析**: sshd 通常对同一次尝试同时打这一行和
+  `Failed password for invalid user X`，两条都收会把失败次数翻倍、等效把阈值砍半。
+  记录在 `docs/TODO.md` 的未闭环项，需要先做同次尝试去重。
 
 ## S1 遗留 nit 关闭情况
 

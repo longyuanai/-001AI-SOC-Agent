@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from ai_soc_agent.parsers import parse_file, parse_nginx_line
+import pytest
+
+from ai_soc_agent.parsers import (
+    is_login_endpoint,
+    parse_file,
+    parse_nginx_line,
+)
 
 
 def test_parse_nginx_success():
@@ -79,3 +86,81 @@ def test_parse_nginx_file_skips_unrecognized_lines(tmp_path):
     events = parse_file(str(path), log_type="nginx")
 
     assert [event.result for event in events] == ["success", "failure"]
+
+
+def test_credential_post_to_a_login_path_is_a_web_login():
+    """Every nginx event used to be http_request, so T1110 never saw web logins."""
+    event = parse_nginx_line(
+        '203.0.113.45 - - [24/Jul/2026:09:15:03 +0800] '
+        '"POST /login HTTP/1.1" 401 97 "-" "curl/8"'
+    )
+
+    assert event is not None
+    assert event.action == "web_login"
+    assert event.result == "failure"
+
+
+def test_api_session_post_is_a_web_login():
+    event = parse_nginx_line(
+        '198.51.100.20 - - [24/Jul/2026:09:16:10 +0800] '
+        '"POST /api/session HTTP/2.0" 401 97 "-" "python-requests/2.32.0"'
+    )
+
+    assert event is not None
+    assert event.action == "web_login"
+
+
+def test_getting_the_login_form_is_not_an_authentication_attempt():
+    event = parse_nginx_line(
+        '203.0.113.45 - - [24/Jul/2026:09:15:01 +0800] '
+        '"GET /login HTTP/1.1" 200 1842 "-" "Mozilla/5.0"'
+    )
+
+    assert event is not None
+    assert event.action == "http_request"
+
+
+def test_non_auth_paths_stay_plain_requests():
+    event = parse_nginx_line(
+        '203.0.113.45 - - [24/Jul/2026:09:15:01 +0800] '
+        '"POST /admin?view=users HTTP/1.1" 403 12 "-" "Mozilla/5.0"'
+    )
+
+    assert event is not None
+    assert event.action == "http_request"
+
+
+@pytest.mark.parametrize(
+    ("request_target", "expected"),
+    [
+        ("/login", True),
+        ("/login?next=%2Fhome", True),
+        ("/api/v2/sessions", True),
+        ("/oauth/token", True),
+        ("/wp-login.php", True),
+        ("/user_login.jsp", True),
+        ("/SignIn", True),
+        ("/", False),
+        ("/admin", False),
+        ("/static/login.css", False),
+        ("/auth/login.js", False),
+        ("/products?q=token", False),
+    ],
+)
+def test_login_endpoint_detection(request_target, expected):
+    assert is_login_endpoint(request_target) is expected
+
+
+def test_login_bruteforce_sample_parses_to_five_failed_logins():
+    """Keeps samples/nginx_login_bruteforce.log honest as a demo fixture."""
+    path = Path(__file__).parents[1] / "samples" / "nginx_login_bruteforce.log"
+
+    events = parse_file(str(path), log_type="nginx")
+    failed_logins = [
+        event
+        for event in events
+        if event.action == "web_login" and event.result == "failure"
+    ]
+
+    assert len(failed_logins) == 5
+    assert {event.actor for event in failed_logins} == {"203.0.113.77"}

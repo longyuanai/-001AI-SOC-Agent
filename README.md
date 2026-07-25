@@ -94,6 +94,11 @@ All five MITRE patterns (T1110, T1110.004, T1078, T1548, T1021) surface both as
 v0.5 Findings and as `/alerts` entries. Each pattern reports one finding per
 independent match, so three IPs brute-forcing at once yield three findings.
 
+Login attempts are recognized per source: sshd `Failed`/`Accepted` for any auth
+method (password, publickey, ...), Okta `user.session.start`, Windows 4624/4625,
+and — for nginx — a credential-submitting verb (`POST`/`PUT`/`PATCH`) against an
+auth path. `GET /login` is a form load, not an authentication attempt.
+
 ## API server
 
 Run the webhook API locally. It binds `127.0.0.1` by default; override with
@@ -148,7 +153,9 @@ python -m ai_soc_agent.cli scan \
 
 # Non-sshd input needs --log-type, or it is parsed as sshd and yields nothing.
 python -m ai_soc_agent.cli scan \
-  --log-file samples/nginx_access.log --log-type nginx --json
+  --log-file samples/nginx_login_bruteforce.log --log-type nginx
+# 1 finding(s)
+# - [high] Brute force from 203.0.113.77
 ```
 
 Start the suite gateway from `000shared-integration`, then use the frozen
