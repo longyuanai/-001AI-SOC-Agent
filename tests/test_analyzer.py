@@ -1,19 +1,22 @@
-"""Tests for the analyzer with the LLM router stubbed."""
+"""Tests for the analyzer with the LLM router stubbed.
+
+After the v0.1-contract §5 refactor, ``StubRouter`` lives in
+``tests/conftest.py`` and is injected via the ``stub_router`` fixture.
+"""
 
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
 from ai_soc_agent.analyzer import AlertAssessment, analyze_events
 from ai_soc_agent.normalizer import NormalizedEvent
-from shared_llm_core import ChatRequest, ChatResponse, ChatChoice, ChatMessage, ChatUsage
+from shared_llm_core import ChatChoice, ChatMessage, ChatResponse, ChatUsage
 
 
 def _sample_events() -> list[NormalizedEvent]:
-    from datetime import datetime
-
     return [
         NormalizedEvent(
             ts=datetime(2026, 7, 23, 22, 1, 14),
@@ -27,43 +30,14 @@ def _sample_events() -> list[NormalizedEvent]:
     ]
 
 
-def _stub_router(reply_json: dict) -> object:
-    """Returns a fake router with .chat() returning a fixed ChatResponse."""
-    class FakeRouter:
-        def __init__(self, body: dict) -> None:
-            self._body = body
-            self.calls: list[ChatRequest] = []
-
-        def chat(self, tier, req):  # noqa: ARG002
-            self.calls.append(req)
-            return ChatResponse(
-                id="x",
-                model="m",
-                created=0,
-                choices=[
-                    ChatChoice(
-                        index=0,
-                        message=ChatMessage(
-                            role="assistant", content=json.dumps(self._body)
-                        ),
-                        finish_reason="stop",
-                    )
-                ],
-                usage=ChatUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
-            )
-
-    return FakeRouter(reply_json)
-
-
-def test_analyze_empty_events_returns_low_severity_no_call():
-    router = _stub_router({})
-    out = analyze_events([], router)
+def test_analyze_empty_events_returns_low_severity_no_call(stub_router):
+    out = analyze_events([], stub_router)
     assert isinstance(out, AlertAssessment)
     assert out.severity == "low"
-    assert router.calls == []  # no LLM call when there's nothing to analyze
+    assert stub_router.calls == []  # no LLM call when there's nothing to analyze
 
 
-def test_analyze_parses_json_response():
+def test_analyze_parses_json_response(stub_router):
     reply = {
         "summary": "Brute-force attempt from 1.2.3.4 against root.",
         "severity": "high",
@@ -71,15 +45,15 @@ def test_analyze_parses_json_response():
         "attack_pattern": "T1110 - Password Spraying",
         "recommended_action": "Block 1.2.3.4 at the edge firewall.",
     }
-    router = _stub_router(reply)
-    out = analyze_events(_sample_events(), router)
+    stub_router.set_reply(reply)
+    out = analyze_events(_sample_events(), stub_router)
     assert out.severity == "high"
     assert out.confidence == pytest.approx(0.9)
     assert "Brute-force" in out.summary
-    assert router.calls, "expected at least one LLM call"
+    assert stub_router.calls, "expected at least one LLM call"
 
 
-def test_analyze_strips_json_fences():
+def test_analyze_strips_json_fences(stub_router):
     reply = {
         "summary": "x",
         "severity": "low",
@@ -87,29 +61,85 @@ def test_analyze_strips_json_fences():
         "attack_pattern": "x",
         "recommended_action": "x",
     }
-    router = _stub_router(reply)
     # Patch the response to include code fences.
-    router.chat = lambda tier, req: ChatResponse(  # type: ignore[assignment]
-        id="x",
-        model="m",
-        created=0,
-        choices=[
-            ChatChoice(
-                index=0,
-                message=ChatMessage(role="assistant", content="```json\n" + json.dumps(reply) + "\n```"),
-                finish_reason="stop",
-            )
-        ],
-        usage=ChatUsage(),
-    )
-    out = analyze_events(_sample_events(), router)
+    def fenced_chat(tier, req):  # noqa: ARG001
+        return ChatResponse(
+            id="x",
+            model="m",
+            created=0,
+            choices=[
+                ChatChoice(
+                    index=0,
+                    message=ChatMessage(
+                        role="assistant",
+                        content="```json\n" + json.dumps(reply) + "\n```",
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatUsage(),
+        )
+
+    stub_router.chat = fenced_chat  # type: ignore[assignment]
+    out = analyze_events(_sample_events(), stub_router)
     assert out.severity == "low"
 
 
-def test_analyze_requests_json_object_format():
-    router = _stub_router({"summary": "x", "severity": "low", "confidence": 0.0, "attack_pattern": "x", "recommended_action": "x"})
-    analyze_events(_sample_events(), router)
-    req = router.calls[0]
+def test_analyze_requests_json_object_format(stub_router):
+    stub_router.set_reply(
+        {"summary": "x", "severity": "low", "confidence": 0.0,
+         "attack_pattern": "x", "recommended_action": "x"}
+    )
+    analyze_events(_sample_events(), stub_router)
+    req = stub_router.calls[0]
     assert req.response_format == {"type": "json_object"}
     assert req.messages[0].role == "system"
     assert req.messages[1].role == "user"
+
+
+# ---- NEW tests added for v0.1-contract §5 (count ≥ 15) ----
+
+
+def test_stub_router_fixture_returns_fresh_instance(stub_router):
+    """Two invocations of the fixture must be independent."""
+    from tests.conftest import StubRouter  # type: ignore
+
+    assert isinstance(stub_router, StubRouter)
+    stub_router.set_reply({"a": 1})
+    assert stub_router.reply == {"a": 1}
+
+
+def test_stub_router_records_each_chat_call(stub_router):
+    """Calls list is appended on every chat() invocation."""
+    stub_router.set_reply({"summary": "x", "severity": "low", "confidence": 0.0,
+                           "attack_pattern": "x", "recommended_action": "x"})
+    analyze_events(_sample_events(), stub_router)
+    analyze_events(_sample_events(), stub_router)
+    assert len(stub_router.calls) == 2
+
+
+def test_stub_router_with_factory(stub_router_with):
+    """The factory fixture should yield independent stubs per call."""
+    a = stub_router_with({"severity": "high"})
+    b = stub_router_with({"severity": "low"})
+    a.set_reply({"summary": "A", "severity": "high", "confidence": 1.0,
+                 "attack_pattern": "x", "recommended_action": "x"})
+    b.set_reply({"summary": "B", "severity": "low", "confidence": 0.0,
+                 "attack_pattern": "x", "recommended_action": "x"})
+    assert a is not b
+    assert a.reply["severity"] == "high"
+    assert b.reply["severity"] == "low"
+
+
+def test_analyze_handles_low_confidence_response(stub_router):
+    """Low-confidence LLM reply still parses and surfaces as medium severity."""
+    stub_router.set_reply({
+        "summary": "uncertain event",
+        "severity": "medium",
+        "confidence": 0.42,
+        "attack_pattern": "unknown",
+        "recommended_action": "monitor",
+    })
+    out = analyze_events(_sample_events(), stub_router)
+    assert out.severity == "medium"
+    assert out.confidence == pytest.approx(0.42)
