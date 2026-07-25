@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from shared_llm_core.finding import Finding
+from shared_llm_core.rule_engine import RuleContext, RuleEngine
+
 from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.patterns import build_pattern_engine
 
 
 @dataclass(frozen=True)
@@ -246,7 +250,27 @@ def detect_credential_stuffing(
     return alerts
 
 
+def detect_patterns(
+    events: list[NormalizedEvent],
+    *,
+    facts: dict[str, Any] | None = None,
+    engine: RuleEngine | None = None,
+) -> list[Finding]:
+    """Evaluate all MITRE patterns through the frozen v0.5 RuleEngine."""
+    merged_facts: dict[str, Any] = {"events": tuple(events)}
+    if facts:
+        merged_facts.update(facts)
+    timestamps = [event.ts for event in events]
+    context = RuleContext(
+        subject="soc-event-stream",
+        facts=merged_facts,
+        window=(min(timestamps), max(timestamps)) if timestamps else None,
+    )
+    selected_engine = engine if engine is not None else build_pattern_engine()
+    return selected_engine.evaluate(context)
+
+
 def correlate(events: list[NormalizedEvent]) -> list[Alert]:
-    """Run all enabled correlation rules."""
+    """Run the frozen v0.5 Alert API while Phase-2 emits Findings separately."""
     alerts = [*detect_brute_force(events), *detect_credential_stuffing(events)]
     return sorted(alerts, key=lambda alert: (_utc_timestamp(alert.first_seen), alert.kind, alert.id))

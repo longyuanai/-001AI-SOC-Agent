@@ -1,0 +1,3 @@
+{"ts":"2026-07-25T05:00:00Z","actor":"operator","action":"ssh_login","target":"db-1","result":"success","source":"sshd","raw":"operator connected to db-1","extra":{"user":"operator","destination_host":"db-1"}}
+{"ts":"2026-07-25T05:03:00Z","actor":"operator","action":"rdp_login","target":"desktop-2","result":"success","source":"windows","raw":"operator connected to desktop-2","extra":{"user":"operator","destination_host":"desktop-2"}}
+{"ts":"2026-07-25T05:10:00Z","actor":"operator","action":"winrm_login","target":"app-3","result":"success","source":"windows","raw":"operator connected to app-3","extra":{"user":"operator","destination_host":"app-3"}}

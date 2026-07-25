@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sys
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,7 @@ from rich.console import Console
 
 from ai_soc_agent import __version__
 from ai_soc_agent.analyzer import analyze_events
-from ai_soc_agent.correlator import detect_brute_force, detect_credential_stuffing
+from ai_soc_agent.correlator import detect_patterns
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.parsers import (
     parse_evtx_line,
@@ -124,35 +123,21 @@ def _parse_raw_event(raw: str, source: str) -> NormalizedEvent | None:
     return None
 
 
-def _alert_finding(alert: Any) -> dict[str, Any]:
-    if alert.kind == "brute_force":
-        title = f"Brute force from {alert.actor}"
-        confidence = 0.92
-    else:
-        title = f"Credential stuffing for {alert.actor}"
-        confidence = 0.88
-    return {
-        "id": str(uuid.uuid4()),
-        "severity": alert.severity,
-        "confidence": confidence,
-        "title": title,
-        "description": alert.summary,
-        "host": alert.actor,
-        "ts": alert.last_seen.isoformat(),
-        "evidence": [alert.id],
-    }
-
-
 def scan_payload(
     payload: dict[str, Any], *, log_file: str | None = None
 ) -> dict[str, list[dict[str, Any]]]:
     """Convert an IntegrationGateway payload into its Finding envelope."""
     events, threshold = _payload_events(payload, log_file=log_file)
-    alerts = [
-        *detect_brute_force(events, threshold=threshold),
-        *detect_credential_stuffing(events),
-    ]
-    return {"findings": [_alert_finding(alert) for alert in alerts]}
+    findings = detect_patterns(
+        events,
+        facts={"brute_force_threshold": threshold},
+    )
+    serialized = []
+    for finding in findings:
+        item = finding.to_dict()
+        item.pop("source")
+        serialized.append(item)
+    return {"findings": serialized}
 
 
 @click.group()
