@@ -57,3 +57,9 @@
 - 每周一 09:00: 跑 `pytest` 全量,状态写到本表
 - 每周五 17:00: review 完成的 issue,标 done
 - 每月 1 号: 检查 shared-llm-core 是否有 breaking change
+
+---
+
+## Phase-2 后续
+
+- `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。

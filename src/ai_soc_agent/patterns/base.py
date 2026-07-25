@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import ipaddress
 from abc import abstractmethod
 from datetime import UTC, datetime
 from typing import Any, Callable, Hashable
 
-from shared_llm_core.finding import Finding, FindingSeverity, FindingSource
+from shared_llm_core.finding import Finding, FindingSeverity
 from shared_llm_core.rule_engine import Rule, RuleContext
+
+from ai_soc_agent.findings import build_soc_finding, correlation_host
 
 
 def event_value(event: Any, key: str, default: Any = None) -> Any:
@@ -57,18 +58,7 @@ def context_events(ctx: RuleContext) -> tuple[Any, ...]:
 
 def event_host(event: Any) -> str | None:
     """Extract a correlation-safe IP/host without changing Finding schema."""
-    actor = event_value(event, "actor", event_value(event, "src_ip"))
-    if actor not in (None, "", "-", "unknown"):
-        try:
-            return str(ipaddress.ip_address(str(actor)))
-        except ValueError:
-            pass
-
-    for key in ("host", "destination_host", "dest_host", "computer"):
-        value = event_value(event, key)
-        if value not in (None, "", "-", "unknown"):
-            return str(value)
-    return None
+    return correlation_host(event)
 
 
 def event_evidence(event: Any) -> str:
@@ -132,6 +122,10 @@ class SOCPattern(Rule):
         """Select the host used by cross-product correlation."""
         return event_host(events[-1]) if events else None
 
+    def finding_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
+        """Return pattern-specific metadata without changing Finding schema."""
+        return {}
+
     def evaluate(self, ctx: RuleContext) -> list[Finding]:
         """Evaluate this pure rule and return a standard v0.5 Finding."""
         events = self.matched_events(ctx)
@@ -139,13 +133,12 @@ class SOCPattern(Rule):
             return []
         latest = max(events, key=timestamp_key)
         return [
-            Finding(
-                id="",
-                source=FindingSource.SOC,
+            build_soc_finding(
                 severity=self.severity_default,
                 confidence=self.confidence_default,
                 title=self.title(ctx, events),
                 description=self.description(ctx, events),
+                host_event=events[-1],
                 host=self.finding_host(ctx, events),
                 ts=event_timestamp(latest),
                 evidence=tuple(event_evidence(event) for event in events),
@@ -154,6 +147,7 @@ class SOCPattern(Rule):
                     "rule_id": self.id,
                     "tactic": self.tactic,
                     "technique": self.technique,
+                    **self.finding_metadata(ctx, events),
                 },
             )
         ]

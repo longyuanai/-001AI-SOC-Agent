@@ -270,7 +270,46 @@ def detect_patterns(
     return selected_engine.evaluate(context)
 
 
+def _finding_to_alert(finding: Finding) -> Alert | None:
+    metadata = finding.metadata
+    kind = metadata.get("alert_kind")
+    actor = metadata.get("actor")
+    first_seen = metadata.get("first_seen")
+    last_seen = metadata.get("last_seen")
+    if not all(isinstance(value, str) and value for value in (kind, actor, first_seen, last_seen)):
+        return None
+    first_dt = datetime.fromisoformat(first_seen.replace("Z", "+00:00"))
+    last_dt = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+    sources = tuple(str(value) for value in metadata.get("sources", ()))
+    targets = tuple(str(value) for value in metadata.get("targets", ()))
+    return Alert(
+        id=_alert_id(kind, actor, first_dt, last_dt, sources),
+        kind=kind,
+        severity=finding.severity.value,
+        actor=actor,
+        targets=targets,
+        first_seen=first_dt,
+        last_seen=last_dt,
+        event_count=int(metadata.get("event_count", len(finding.evidence))),
+        sources=sources,
+        summary=finding.description,
+    )
+
+
 def correlate(events: list[NormalizedEvent]) -> list[Alert]:
-    """Run the frozen v0.5 Alert API while Phase-2 emits Findings separately."""
-    alerts = [*detect_brute_force(events), *detect_credential_stuffing(events)]
+    """Run compatibility Alert output through the Phase-2 RuleEngine."""
+    findings = detect_patterns(
+        events,
+        facts={
+            "brute_force_threshold": 10,
+            "brute_force_window_seconds": 300,
+            "credential_stuffing_mode": "cross_source",
+            "credential_stuffing_window_seconds": 600,
+        },
+    )
+    alerts = [
+        alert
+        for finding in findings
+        if (alert := _finding_to_alert(finding)) is not None
+    ]
     return sorted(alerts, key=lambda alert: (_utc_timestamp(alert.first_seen), alert.kind, alert.id))
