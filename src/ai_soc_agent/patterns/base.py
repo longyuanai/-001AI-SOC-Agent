@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 from abc import abstractmethod
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Callable, Hashable
 
 from shared_llm_core.finding import Finding, FindingSeverity, FindingSource
 from shared_llm_core.rule_engine import Rule, RuleContext
@@ -75,6 +75,32 @@ def event_evidence(event: Any) -> str:
     """Prefer the original log text, falling back to the normalized event."""
     raw = event_value(event, "raw")
     return str(raw) if raw not in (None, "") else str(event)
+
+
+def first_group_window(
+    events: tuple[Any, ...],
+    *,
+    group_key: Callable[[Any], Hashable | None],
+    predicate: Callable[[Any], bool],
+    threshold: int,
+    seconds: float,
+) -> tuple[Any, ...]:
+    """Return the first grouped sliding window reaching a threshold."""
+    groups: dict[Hashable, list[Any]] = {}
+    for event in sorted(events, key=timestamp_key):
+        if event_timestamp(event) is None or not predicate(event):
+            continue
+        key = group_key(event)
+        if key is None:
+            continue
+        group = groups.setdefault(key, [])
+        group.append(event)
+        end = timestamp_key(event)
+        while group and end - timestamp_key(group[0]) > seconds:
+            group.pop(0)
+        if len(group) >= threshold:
+            return tuple(group)
+    return ()
 
 
 class SOCPattern(Rule):

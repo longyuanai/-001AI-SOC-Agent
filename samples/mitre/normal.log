@@ -1,0 +1,4 @@
+{"ts":"2026-07-25T04:00:00Z","actor":"192.0.2.10","action":"ssh_login","target":"alice","result":"success","source":"sshd","raw":"Accepted password for alice","extra":{"user":"alice","host":"app-1","continent":"NA"}}
+{"ts":"2026-07-25T04:05:00Z","actor":"192.0.2.11","action":"ssh_login","target":"bob","result":"failure","source":"sshd","raw":"Failed password for bob","extra":{"user":"bob","host":"app-2","continent":"NA"}}
+{"ts":"2026-07-25T04:10:00Z","actor":"carol","action":"sudo_exec","target":"root","result":"success","source":"linux-audit","raw":"sudo command accepted","extra":{"user":"carol","host":"10.0.0.20","process":"sudo"}}
+{"ts":"2026-07-25T04:15:00Z","actor":"192.0.2.12","action":"rdp_login","target":"desktop-1","result":"success","source":"windows","raw":"RDP login","extra":{"user":"dave","destination_host":"desktop-1"}}

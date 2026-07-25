@@ -1,0 +1,2 @@
+{"ts":"2026-07-25T02:00:00Z","actor":"198.51.100.10","action":"okta_login","target":"analyst@example.test","result":"success","source":"okta","raw":"Okta login from New York","extra":{"user":"analyst@example.test","continent":"NA"}}
+{"ts":"2026-07-25T02:30:00Z","actor":"198.51.100.20","action":"okta_login","target":"analyst@example.test","result":"success","source":"okta","raw":"Okta login from Frankfurt","extra":{"user":"analyst@example.test","continent":"EU"}}

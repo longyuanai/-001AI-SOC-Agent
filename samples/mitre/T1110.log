@@ -1,0 +1,5 @@
+{"ts":"2026-07-25T01:00:00Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","raw":"Failed password for root from 203.0.113.45","extra":{"host":"soc-edge-1"}}
+{"ts":"2026-07-25T01:00:10Z","actor":"203.0.113.45","action":"ssh_login","target":"admin","result":"failure","source":"sshd","raw":"Failed password for admin from 203.0.113.45","extra":{"host":"soc-edge-1"}}
+{"ts":"2026-07-25T01:00:20Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","raw":"Failed password for root from 203.0.113.45","extra":{"host":"soc-edge-1"}}
+{"ts":"2026-07-25T01:00:30Z","actor":"203.0.113.45","action":"ssh_login","target":"guest","result":"failure","source":"sshd","raw":"Failed password for guest from 203.0.113.45","extra":{"host":"soc-edge-1"}}
+{"ts":"2026-07-25T01:01:00Z","actor":"203.0.113.45","action":"ssh_login","target":"root","result":"failure","source":"sshd","raw":"Failed password for root from 203.0.113.45","extra":{"host":"soc-edge-1"}}
