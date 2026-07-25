@@ -8,13 +8,45 @@ hitting a real provider.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from shared_llm_core import ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatUsage
+
+def _ensure_shared_llm_core() -> None:
+    """Fall back to the contract stub when the sibling repo isn't checked out.
+
+    ``pyproject.toml`` declares ``shared-llm-core`` as a ``path`` dependency on
+    ``../000shared-llm-core``. Without that sibling directory the whole suite is
+    uncollectable, which is why this repo had no CI. Prefer the real package;
+    only stand in for it when it is genuinely absent.
+    """
+    if importlib.util.find_spec("shared_llm_core") is not None:
+        return
+    stub_root = Path(__file__).parent / "_contract_stub"
+    sys.path.insert(0, str(stub_root))
+    warnings.warn(
+        "shared_llm_core not installed; using tests/_contract_stub. Cross-repo "
+        "behavior is NOT covered — see tests/_contract_stub/README.md.",
+        stacklevel=2,
+    )
+
+
+_ensure_shared_llm_core()
+
+from shared_llm_core import (  # noqa: E402
+    ChatChoice,
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    ChatUsage,
+)
 
 
 @dataclass

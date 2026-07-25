@@ -7,16 +7,20 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from ai_soc_agent.cli import cli
 
 SUITE_ROOT = Path(__file__).resolve().parents[2]
 INTEGRATION_SRC = SUITE_ROOT / "000shared-integration" / "src"
-if str(INTEGRATION_SRC) not in sys.path:
+if INTEGRATION_SRC.is_dir() and str(INTEGRATION_SRC) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_SRC))
 
-from shared_integration.adapters.soc import SOCAdapter  # noqa: E402
+try:
+    from shared_integration.adapters.soc import SOCAdapter
+except ImportError:  # sibling repo not checked out (CI, clean container)
+    SOCAdapter = None
 
 
 def _failed_lines(count: int = 5, ip: str = "203.0.113.45") -> list[str]:
@@ -64,6 +68,8 @@ def test_cli_handles_bad_json_gracefully() -> None:
     assert "invalid JSON payload" in result.output
 
 
+@pytest.mark.cross_repo
+@pytest.mark.skipif(SOCAdapter is None, reason="000shared-integration not checked out")
 def test_json_subprocess_adapter_runs_soc_cli_end_to_end() -> None:
     async def collect() -> list:
         adapter = SOCAdapter(SUITE_ROOT / "001AI-SOC-Agent")

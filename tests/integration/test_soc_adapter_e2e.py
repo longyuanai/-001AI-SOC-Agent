@@ -35,6 +35,15 @@ def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> d
         return json.loads(response.read().decode("utf-8"))
 
 
+pytestmark = [
+    pytest.mark.cross_repo,
+    pytest.mark.skipif(
+        not (INTEGRATION_ROOT.is_dir() and CORE_ROOT.is_dir()),
+        reason="000shared-integration / 000shared-llm-core not checked out",
+    ),
+]
+
+
 @pytest.fixture(scope="module")
 def gateway_server() -> Iterator[None]:
     env = os.environ.copy()

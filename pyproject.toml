@@ -6,6 +6,7 @@ authors = ["longyuanai"]
 license = "MIT"
 readme = "README.md"
 packages = [{ include = "ai_soc_agent", from = "src" }]
+include = [{ path = "src/ai_soc_agent/py.typed", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -18,6 +19,8 @@ uvicorn = "0.51.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"
 pytest-mock = "^3.14.0"
+httpx = "^0.27"
+ruff = "^0.6"
 
 [tool.poetry.plugins."longyuanai.soc_patterns"]
 "001.brute_force" = "ai_soc_agent.patterns.brute_force:BruteForceBurstRule"
@@ -32,7 +35,12 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--basetemp=.pytest-tmp"
+pythonpath = ["src"]
+# No --basetemp override: pinning it to a repo-local directory caused the seven
+# Windows file-lock ERRORs recorded in AUDIT/001-S1.md and breaks parallel runs.
+markers = [
+    "cross_repo: needs the sibling 000shared-* repos checked out",
+]
 
 [tool.ruff]
 line-length = 100

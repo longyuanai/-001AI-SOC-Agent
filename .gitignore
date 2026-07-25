@@ -10,7 +10,10 @@ venv/
 .pytest-tmp*/
 .ruff_cache/
 .uv-cache/
-*.json
-!configs/*.json
+# Generated reports only — a blanket *.json rule silently swallowed fixtures.
+report.json
+report.md
 *.log
 !samples/*.log
+!samples/**/*.log
+!tests/fixtures/*.log
