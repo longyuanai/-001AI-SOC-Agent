@@ -19,6 +19,13 @@ uvicorn = "0.51.0"
 pytest = "^8.2.0"
 pytest-mock = "^3.14.0"
 
+[tool.poetry.plugins."longyuanai.soc_patterns"]
+"001.brute_force" = "ai_soc_agent.patterns.brute_force:BruteForceBurstRule"
+"001.geo_anomaly" = "ai_soc_agent.patterns.geo_anomaly:GeoAnomalousLoginRule"
+"001.priv_esc" = "ai_soc_agent.patterns.priv_esc:PrivilegeEscalationRule"
+"001.lateral_movement" = "ai_soc_agent.patterns.lateral_movement:LateralMovementRule"
+"001.credential_stuffing" = "ai_soc_agent.patterns.credential_stuffing:CredentialStuffingRule"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
