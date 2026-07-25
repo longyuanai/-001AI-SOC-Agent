@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-
 from shared_llm_core import ChatChoice, ChatMessage, ChatRequest, ChatResponse, ChatUsage
 
 

@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from shared_llm_core.rule_engine import RuleContext
 
+from ai_soc_agent.config import (
+    CREDENTIAL_STUFFING_CROSS_SOURCE_WINDOW_SECONDS,
+    CREDENTIAL_STUFFING_FAMILIES,
+    CREDENTIAL_STUFFING_USER_THRESHOLD,
+    CREDENTIAL_STUFFING_WINDOW_SECONDS,
+    CROSS_SOURCE_MODE,
+)
 from ai_soc_agent.patterns.base import (
     SOCPattern,
     context_events,
+    distinct_windows,
     event_value,
-    timestamp_key,
+    latest_event,
+    positive_int,
+    positive_number,
 )
 
 
@@ -49,94 +58,108 @@ def _cross_source_user(event: Any) -> str | None:
         if value not in (None, "", "-", "unknown"):
             return str(value).casefold()
     target = event_value(event, "target")
-    if (
-        target in (None, "", "-", "unknown")
-        or (_source_family(event) == "web" and str(target).startswith("/"))
+    if target in (None, "", "-", "unknown") or (
+        _source_family(event) == "web" and str(target).startswith("/")
     ):
         return None
     return str(target).casefold()
 
 
+def _is_failure(event: Any) -> bool:
+    return event_value(event, "result") == "failure"
+
+
 class CredentialStuffingRule(SOCPattern):
-    """Detect one credential fingerprint failing against three user accounts."""
+    """Detect one credential reused against many accounts, or one account
+    failing across several source families in ``cross_source`` mode."""
 
     id = "001.mitre.t1110.004.credential-stuffing"
     tactic = "TA0006"
     technique = "T1110.004"
+    alert_kind = "credential_stuffing"
     confidence_default = 0.91
 
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        if ctx.facts.get("credential_stuffing_mode") == "cross_source":
-            return self._cross_source_events(ctx)
+    def _is_cross_source(self, ctx: RuleContext) -> bool:
+        return ctx.facts.get("credential_stuffing_mode") == CROSS_SOURCE_MODE
 
-        groups: dict[str, list[Any]] = defaultdict(list)
-        for event in sorted(context_events(ctx), key=timestamp_key):
-            credential = _credential(event)
-            user = _user(event)
-            if (
-                credential is None
-                or user is None
-                or event_value(event, "result") != "failure"
-            ):
-                continue
-            group = groups[credential]
-            group.append(event)
-            end = timestamp_key(event)
-            group[:] = [item for item in group if end - timestamp_key(item) <= 300]
-            by_user = {_user(item): item for item in group}
-            if len(by_user) >= 3:
-                return tuple(by_user.values())
-        return ()
+    def _required_families(self, ctx: RuleContext) -> frozenset[str]:
+        return frozenset(
+            ctx.facts.get("required_families", CREDENTIAL_STUFFING_FAMILIES)
+        )
 
-    def _cross_source_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        required = frozenset(ctx.facts.get("required_families", {"ssh", "vpn", "web"}))
-        window_seconds = float(ctx.facts.get("credential_stuffing_window_seconds", 600))
-        groups: dict[str, list[Any]] = defaultdict(list)
-        for event in sorted(context_events(ctx), key=timestamp_key):
-            user = _cross_source_user(event)
-            family = _source_family(event)
-            if (
-                user is None
-                or family not in required
-                or event_value(event, "result") != "failure"
-            ):
-                continue
-            group = groups[user]
-            group.append(event)
-            end = timestamp_key(event)
-            group[:] = [
-                item for item in group if end - timestamp_key(item) <= window_seconds
-            ]
-            by_family = {_source_family(item): item for item in group}
-            if required.issubset(by_family):
-                return tuple(by_family[family] for family in sorted(required))
-        return ()
+    def matched_event_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        if self._is_cross_source(ctx):
+            return self._cross_source_groups(ctx)
+
+        threshold = positive_int(
+            ctx.facts.get("credential_stuffing_user_threshold"),
+            CREDENTIAL_STUFFING_USER_THRESHOLD,
+        )
+        window_seconds = positive_number(
+            ctx.facts.get("credential_stuffing_window_seconds"),
+            CREDENTIAL_STUFFING_WINDOW_SECONDS,
+        )
+        if threshold is None or window_seconds is None:
+            return ()
+        return distinct_windows(
+            context_events(ctx),
+            group_key=_credential,
+            distinct_key=_user,
+            predicate=_is_failure,
+            threshold=threshold,
+            seconds=window_seconds,
+        )
+
+    def _cross_source_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        required = self._required_families(ctx)
+        if not required:
+            return ()
+        window_seconds = positive_number(
+            ctx.facts.get("credential_stuffing_cross_source_window_seconds"),
+            CREDENTIAL_STUFFING_CROSS_SOURCE_WINDOW_SECONDS,
+        )
+        if window_seconds is None:
+            return ()
+        return distinct_windows(
+            context_events(ctx),
+            group_key=_cross_source_user,
+            distinct_key=_source_family,
+            predicate=lambda event: _is_failure(event)
+            and _source_family(event) in required,
+            threshold=len(required),
+            seconds=window_seconds,
+        )
 
     def title(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        actor = event_value(events[-1], "actor", "unknown")
+        if self._is_cross_source(ctx):
+            user = _cross_source_user(latest_event(events)) or ctx.subject
+            return f"Credential stuffing against {user}"
+        actor = event_value(latest_event(events), "actor", "unknown")
         return f"Credential stuffing from {actor}"
 
     def description(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        if ctx.facts.get("credential_stuffing_mode") == "cross_source":
-            user = _cross_source_user(events[-1]) or ctx.subject
+        if self._is_cross_source(ctx):
+            user = _cross_source_user(latest_event(events)) or ctx.subject
             families = sorted({_source_family(event) for event in events})
             return f"{user} failed authentication across {', '.join(families)}."
-        users = sorted({_user(event) for event in events if _user(event)})
+        users = sorted({user for event in events if (user := _user(event))})
         return f"One credential fingerprint failed against users: {', '.join(users)}."
 
-    def finding_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
-        if ctx.facts.get("credential_stuffing_mode") == "cross_source":
-            actor = _cross_source_user(events[-1])
-            targets = [actor] if actor else []
-        else:
-            actor = event_value(events[-1], "actor")
-            targets = sorted({_user(event) for event in events if _user(event)})
-        return {
-            "alert_kind": "credential_stuffing",
-            "actor": actor,
-            "targets": targets,
-            "sources": sorted({_source_family(event) for event in events}),
-            "event_count": len(events),
-            "first_seen": str(event_value(events[0], "ts")),
-            "last_seen": str(event_value(events[-1], "ts")),
+    def alert_actor(self, ctx: RuleContext, events: tuple[Any, ...]) -> str | None:
+        if self._is_cross_source(ctx):
+            return _cross_source_user(latest_event(events))
+        return super().alert_actor(ctx, events)
+
+    def alert_targets(self, ctx: RuleContext, events: tuple[Any, ...]) -> list[str]:
+        if self._is_cross_source(ctx):
+            actor = _cross_source_user(latest_event(events))
+            return [actor] if actor else []
+        return sorted({user for event in events if (user := _user(event))})
+
+    def extra_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
+        metadata: dict[str, Any] = {
+            "source_families": sorted({_source_family(event) for event in events}),
         }
+        if not self._is_cross_source(ctx):
+            metadata["credential_fingerprint"] = _credential(latest_event(events))
+        return metadata

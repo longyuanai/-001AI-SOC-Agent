@@ -13,8 +13,10 @@ from ai_soc_agent.parsers import parse_file, parse_line
 def sample_log(tmp_path):
     p = tmp_path / "auth.log"
     p.write_text(
-        "Jul 23 22:01:14 host sshd[1234]: Failed password for invalid user root from 1.2.3.4 port 22 ssh2\n"
-        "Jul 23 22:01:16 host sshd[1234]: Accepted password for alice from 1.2.3.4 port 22 ssh2\n"
+        "Jul 23 22:01:14 host sshd[1234]: Failed password for invalid user root"
+        " from 1.2.3.4 port 22 ssh2\n"
+        "Jul 23 22:01:16 host sshd[1234]: Accepted password for alice"
+        " from 1.2.3.4 port 22 ssh2\n"
         "Jul 23 22:01:18 host sshd[999]: Some other message that we ignore\n",
         encoding="utf-8",
     )
@@ -22,7 +24,10 @@ def sample_log(tmp_path):
 
 
 def test_parse_failed_password():
-    line = "Jul 23 22:01:14 host sshd[1234]: Failed password for invalid user root from 1.2.3.4 port 22 ssh2"
+    line = (
+        "Jul 23 22:01:14 host sshd[1234]: Failed password for invalid user root"
+        " from 1.2.3.4 port 22 ssh2"
+    )
     ev = parse_line(line, year=2026)
     assert ev is not None
     assert ev.actor == "1.2.3.4"
@@ -50,7 +55,10 @@ def test_parse_non_sshd_line_returns_none():
 
 
 def test_parse_sshd_other_message_returns_none():
-    ev = parse_line("Jul 23 22:01:18 host sshd[999]: Did not receive identification string from 1.2.3.4")
+    ev = parse_line(
+        "Jul 23 22:01:18 host sshd[999]:"
+        " Did not receive identification string from 1.2.3.4"
+    )
     assert ev is None
 
 

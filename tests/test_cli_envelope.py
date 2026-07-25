@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from ai_soc_agent.cli import cli
@@ -16,7 +17,13 @@ INTEGRATION_SRC = SUITE_ROOT / "000shared-integration" / "src"
 if str(INTEGRATION_SRC) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_SRC))
 
-from shared_integration.adapters.soc import SOCAdapter  # noqa: E402
+# The suite adapter lives in a sibling repo. Skip rather than fail collection when
+# only this project is checked out — otherwise the whole suite errors out on a
+# standalone clone.
+SOCAdapter = pytest.importorskip(
+    "shared_integration.adapters.soc",
+    reason=f"000shared-integration not checked out at {INTEGRATION_SRC}",
+).SOCAdapter
 
 
 def _failed_lines(count: int = 5, ip: str = "203.0.113.45") -> list[str]:

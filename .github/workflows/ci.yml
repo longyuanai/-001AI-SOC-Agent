@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # This project depends on sibling suite repos through `path` dependencies, so
+  # the checkout layout below must mirror the local `003AI+网络安全` parent dir.
+  # Override the repo names with the `SHARED_LLM_CORE_REPO` /
+  # `SHARED_INTEGRATION_REPO` Actions variables if they are named differently.
+  PROJECT_DIR: 001AI-SOC-Agent
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this project
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.PROJECT_DIR }}
+
+      - name: Check out shared-llm-core (required)
+        id: core
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_LLM_CORE_REPO || format('{0}/000shared-llm-core', github.repository_owner) }}
+          token: ${{ secrets.SUITE_REPO_TOKEN || github.token }}
+          path: 000shared-llm-core
+
+      - name: Fail with an actionable message when the sibling repo is missing
+        if: steps.core.outcome != 'success'
+        run: |
+          echo "::error title=shared-llm-core not available::ai-soc-agent declares" \
+               "shared-llm-core as a path dependency on ../000shared-llm-core, so it" \
+               "cannot be installed or tested without it. Set the repository variable" \
+               "SHARED_LLM_CORE_REPO to owner/name, and if it is private add a" \
+               "SUITE_REPO_TOKEN secret with read access."
+          exit 1
+
+      - name: Check out shared-integration (optional, enables suite tests)
+        id: integration
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_INTEGRATION_REPO || format('{0}/000shared-integration', github.repository_owner) }}
+          token: ${{ secrets.SUITE_REPO_TOKEN || github.token }}
+          path: 000shared-integration
+
+      - name: Report suite-test coverage for this run
+        run: |
+          if [ "${{ steps.integration.outcome }}" = "success" ]; then
+            echo "shared-integration present: cross-repo suite tests will run." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "shared-integration absent: cross-repo suite tests will skip." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache the virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PROJECT_DIR }}/.venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles(format('{0}/poetry.lock', env.PROJECT_DIR), format('{0}/pyproject.toml', env.PROJECT_DIR)) }}
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction
+
+      - name: Lint
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: poetry run ruff check src tests
+
+      - name: Test
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: poetry run pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this project
+        uses: actions/checkout@v4
+        with:
+          path: 001AI-SOC-Agent
+
+      - name: Check out shared-llm-core
+        id: core
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SHARED_LLM_CORE_REPO || format('{0}/000shared-llm-core', github.repository_owner) }}
+          token: ${{ secrets.SUITE_REPO_TOKEN || github.token }}
+          path: 000shared-llm-core
+
+      - name: Skip when the sibling repo is unavailable
+        if: steps.core.outcome != 'success'
+        run: |
+          echo "::warning::shared-llm-core unavailable; skipping the image build." \
+               "See the test job for how to configure access."
+
+      # The Dockerfile expects the shared parent as its build context, exactly as
+      # documented in the README.
+      - name: Build the production image
+        if: steps.core.outcome == 'success'
+        run: docker build -f 001AI-SOC-Agent/Dockerfile -t ai-soc-agent:ci .
+
+      - name: Verify the container serves /health
+        if: steps.core.outcome == 'success'
+        run: |
+          docker run -d --rm --name ai-soc-ci -p 8080:8080 ai-soc-agent:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health; then
+              docker stop ai-soc-ci
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not become healthy"
+          docker logs ai-soc-ci || true
+          docker stop ai-soc-ci || true
+          exit 1

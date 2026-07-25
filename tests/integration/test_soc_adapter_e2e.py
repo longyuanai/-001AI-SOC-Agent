@@ -22,6 +22,13 @@ CORE_ROOT = SUITE_ROOT / "000shared-llm-core"
 FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "sshd_bruteforce.log"
 BASE_URL = "http://127.0.0.1:18080"
 
+# These boot the real suite gateway from sibling repos. Skip when only this
+# project is checked out instead of failing the whole run.
+pytestmark = pytest.mark.skipif(
+    not (INTEGRATION_ROOT.is_dir() and CORE_ROOT.is_dir()),
+    reason="requires 000shared-integration and 000shared-llm-core checked out alongside",
+)
+
 
 def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")

@@ -8,7 +8,7 @@ shared LLM router, and print a structured Markdown report.
 from typing import Any
 
 from ai_soc_agent.adapter import SOCProductAdapter
-from ai_soc_agent.correlator import Alert, correlate, detect_credential_stuffing
+from ai_soc_agent.correlator import Alert, correlate, detect_patterns
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.parsers import parse_line
 
@@ -21,7 +21,7 @@ __all__ = [
     "SOCProductAdapter",
     "analyze_events",
     "correlate",
-    "detect_credential_stuffing",
+    "detect_patterns",
     "parse_line",
     "render_markdown",
     "__version__",

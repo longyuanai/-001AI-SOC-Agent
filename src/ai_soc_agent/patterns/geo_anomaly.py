@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from shared_llm_core.rule_engine import RuleContext
 
+from ai_soc_agent.config import (
+    GEO_ANOMALY_CONTINENT_THRESHOLD,
+    GEO_ANOMALY_WINDOW_SECONDS,
+)
 from ai_soc_agent.patterns.base import (
     SOCPattern,
     context_events,
+    distinct_windows,
     event_value,
-    timestamp_key,
+    latest_event,
+    positive_int,
+    positive_number,
 )
 
 
@@ -22,39 +28,58 @@ def _user(event: Any) -> str | None:
     return str(value).casefold() if value not in (None, "", "-", "unknown") else None
 
 
+def _continent(event: Any) -> str | None:
+    value = event_value(event, "continent")
+    return str(value).upper() if value not in (None, "", "unknown") else None
+
+
 class GeoAnomalousLoginRule(SOCPattern):
     """Detect one user logging in successfully from multiple continents."""
 
     id = "001.mitre.t1078.geo-anomalous-login"
     tactic = "TA0001"
     technique = "T1078"
+    alert_kind = "geo_anomaly"
     confidence_default = 0.90
 
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        groups: dict[str, list[Any]] = defaultdict(list)
-        for event in sorted(context_events(ctx), key=timestamp_key):
-            continent = event_value(event, "continent")
-            user = _user(event)
-            if (
-                user is None
-                or continent in (None, "", "unknown")
-                or event_value(event, "result") != "success"
-            ):
-                continue
-            group = groups[user]
-            group.append(event)
-            end = timestamp_key(event)
-            group[:] = [item for item in group if end - timestamp_key(item) <= 86_400]
-            by_continent = {
-                str(event_value(item, "continent")).upper(): item for item in group
-            }
-            if len(by_continent) >= 2:
-                return tuple(by_continent.values())
-        return ()
+    def matched_event_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        threshold = positive_int(
+            ctx.facts.get("geo_anomaly_continent_threshold"),
+            GEO_ANOMALY_CONTINENT_THRESHOLD,
+        )
+        window_seconds = positive_number(
+            ctx.facts.get("geo_anomaly_window_seconds"), GEO_ANOMALY_WINDOW_SECONDS
+        )
+        if threshold is None or window_seconds is None:
+            return ()
+        return distinct_windows(
+            context_events(ctx),
+            group_key=_user,
+            distinct_key=_continent,
+            predicate=lambda event: event_value(event, "result") == "success",
+            threshold=threshold,
+            seconds=window_seconds,
+        )
 
     def title(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        return f"Geographically anomalous login for {_user(events[-1]) or ctx.subject}"
+        user = _user(latest_event(events)) or ctx.subject
+        return f"Geographically anomalous login for {user}"
 
     def description(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
         continents = sorted({str(event_value(event, "continent")) for event in events})
         return f"Successful logins crossed continents: {', '.join(continents)}."
+
+    def alert_actor(self, ctx: RuleContext, events: tuple[Any, ...]) -> str | None:
+        return _user(latest_event(events))
+
+    def extra_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "continents": sorted({c for event in events if (c := _continent(event))}),
+            "source_ips": sorted(
+                {
+                    str(event_value(event, "actor"))
+                    for event in events
+                    if event_value(event, "actor") not in (None, "", "-", "unknown")
+                }
+            ),
+        }

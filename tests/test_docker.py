@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-
 
 ROOT = Path(__file__).parents[1]
 DOCKERFILE = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -27,12 +27,21 @@ def test_dockerfile_runs_api_as_non_root():
     assert '"--host", "0.0.0.0"' in DOCKERFILE
 
 
-def test_dockerfile_has_healthcheck_and_no_embedded_credentials():
+def test_dockerfile_has_healthcheck():
     assert "HEALTHCHECK" in DOCKERFILE
-    assert "http://127.0.0.1:8080/alerts" in DOCKERFILE
-    assert "API_KEY" not in DOCKERFILE
-    assert "PASSWORD" not in DOCKERFILE
-    assert "TOKEN" not in DOCKERFILE
+    # /health, not /alerts: the latter 401s once AI_SOC_API_TOKEN is configured.
+    assert "http://127.0.0.1:8080/health" in DOCKERFILE
+
+
+def test_dockerfile_bakes_in_no_credentials():
+    """Assert on assignments, not on the words. Naming an env var in a comment
+    is documentation; ``ENV AI_SOC_API_TOKEN=...`` would be a leaked secret."""
+    assignments = re.findall(
+        r"^\s*(?:ENV|ARG)\s+(.+)$", DOCKERFILE, flags=re.MULTILINE | re.IGNORECASE
+    )
+    secretish = re.compile(r"(API_KEY|PASSWORD|TOKEN|SECRET|CREDENTIAL)", re.IGNORECASE)
+
+    assert [line for line in assignments if secretish.search(line)] == []
 
 
 def test_dockerignore_excludes_local_and_sensitive_artifacts():

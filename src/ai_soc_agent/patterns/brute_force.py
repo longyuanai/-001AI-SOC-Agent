@@ -7,11 +7,15 @@ from typing import Any
 
 from shared_llm_core.rule_engine import RuleContext
 
+from ai_soc_agent.config import BRUTE_FORCE_THRESHOLD, BRUTE_FORCE_WINDOW_SECONDS
 from ai_soc_agent.patterns.base import (
     SOCPattern,
     context_events,
+    count_windows,
     event_value,
-    first_group_window,
+    latest_event,
+    positive_int,
+    positive_number,
 )
 
 
@@ -24,58 +28,44 @@ def _ip_actor(event: Any) -> str | None:
 
 
 class BruteForceBurstRule(SOCPattern):
-    """Detect at least five failed logins from one IP within 60 seconds."""
+    """Detect repeated failed logins from one IP inside a short window."""
 
     id = "001.mitre.t1110.brute-force-burst"
     tactic = "TA0006"
     technique = "T1110"
+    alert_kind = "brute_force"
     confidence_default = 0.92
 
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        threshold = ctx.facts.get("brute_force_threshold", 5)
-        window_seconds = ctx.facts.get("brute_force_window_seconds", 60)
-        if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
+    def _window_seconds(self, ctx: RuleContext) -> float | None:
+        return positive_number(
+            ctx.facts.get("brute_force_window_seconds"), BRUTE_FORCE_WINDOW_SECONDS
+        )
+
+    def matched_event_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        threshold = positive_int(
+            ctx.facts.get("brute_force_threshold"), BRUTE_FORCE_THRESHOLD
+        )
+        window_seconds = self._window_seconds(ctx)
+        if threshold is None or window_seconds is None:
             return ()
-        if not isinstance(window_seconds, (int, float)) or window_seconds <= 0:
-            return ()
-        return first_group_window(
+        return count_windows(
             context_events(ctx),
             group_key=_ip_actor,
             predicate=lambda event: event_value(event, "result") == "failure"
             and "login" in str(event_value(event, "action", "")).casefold(),
             threshold=threshold,
-            seconds=float(window_seconds),
+            seconds=window_seconds,
         )
 
     def title(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        return f"Brute force from {_ip_actor(events[-1]) or ctx.subject}"
+        return f"Brute force from {_ip_actor(latest_event(events)) or ctx.subject}"
 
     def description(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        window_seconds = int(ctx.facts.get("brute_force_window_seconds", 60))
+        window_seconds = int(self._window_seconds(ctx) or BRUTE_FORCE_WINDOW_SECONDS)
         return (
             f"{len(events)} failed login events from one IP within "
             f"{window_seconds} seconds."
         )
 
-    def finding_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
-        return {
-            "alert_kind": "brute_force",
-            "actor": _ip_actor(events[-1]),
-            "targets": sorted(
-                {
-                    str(event_value(event, "target"))
-                    for event in events
-                    if event_value(event, "target") not in (None, "", "-", "unknown")
-                }
-            ),
-            "sources": sorted(
-                {
-                    str(event_value(event, "source"))
-                    for event in events
-                    if event_value(event, "source") not in (None, "")
-                }
-            ),
-            "event_count": len(events),
-            "first_seen": str(event_value(events[0], "ts")),
-            "last_seen": str(event_value(events[-1], "ts")),
-        }
+    def alert_actor(self, ctx: RuleContext, events: tuple[Any, ...]) -> str | None:
+        return _ip_actor(latest_event(events))

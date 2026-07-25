@@ -10,10 +10,17 @@ import json
 from datetime import datetime
 
 import pytest
-
-from ai_soc_agent.analyzer import AlertAssessment, analyze_events
-from ai_soc_agent.normalizer import NormalizedEvent
 from shared_llm_core import ChatChoice, ChatMessage, ChatResponse, ChatUsage
+
+from ai_soc_agent.analyzer import (
+    PROMPT_NAME,
+    PROMPT_VERSION,
+    AlertAssessment,
+    AnalyzerError,
+    analyze_events,
+)
+from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.prompts import load_prompt
 
 
 def _sample_events() -> list[NormalizedEvent]:
@@ -143,3 +150,122 @@ def test_analyze_handles_low_confidence_response(stub_router):
     out = analyze_events(_sample_events(), stub_router)
     assert out.severity == "medium"
     assert out.confidence == pytest.approx(0.42)
+
+
+# ---- Malformed-LLM-reply handling ----
+
+
+def _reply_with(content):
+    def chat(tier, req):  # noqa: ARG001
+        return ChatResponse(
+            id="x",
+            model="m",
+            created=0,
+            choices=[
+                ChatChoice(
+                    index=0,
+                    message=ChatMessage(role="assistant", content=content),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatUsage(),
+        )
+
+    return chat
+
+
+def test_non_json_reply_raises_analyzer_error(stub_router):
+    """A bare JSONDecodeError used to reach the CLI as an unhandled traceback."""
+    stub_router.chat = _reply_with("I'm afraid I can't do that.")  # type: ignore[assignment]
+
+    with pytest.raises(AnalyzerError, match="not valid JSON"):
+        analyze_events(_sample_events(), stub_router)
+
+
+def test_json_array_reply_raises_analyzer_error(stub_router):
+    stub_router.chat = _reply_with('["not", "an", "object"]')  # type: ignore[assignment]
+
+    with pytest.raises(AnalyzerError, match="must be a JSON object"):
+        analyze_events(_sample_events(), stub_router)
+
+
+def test_empty_reply_raises_analyzer_error(stub_router):
+    stub_router.chat = _reply_with("   ")  # type: ignore[assignment]
+
+    with pytest.raises(AnalyzerError, match="empty message"):
+        analyze_events(_sample_events(), stub_router)
+
+
+def test_null_content_raises_analyzer_error(stub_router):
+    stub_router.chat = _reply_with(None)  # type: ignore[assignment]
+
+    with pytest.raises(AnalyzerError, match="empty message"):
+        analyze_events(_sample_events(), stub_router)
+
+
+def test_response_without_choices_raises_analyzer_error(stub_router):
+    def chat(tier, req):  # noqa: ARG001
+        return ChatResponse(id="x", model="m", created=0, choices=[], usage=ChatUsage())
+
+    stub_router.chat = chat  # type: ignore[assignment]
+
+    with pytest.raises(AnalyzerError, match="no choices"):
+        analyze_events(_sample_events(), stub_router)
+
+
+def test_unknown_severity_falls_back_to_low(stub_router):
+    stub_router.set_reply(
+        {
+            "summary": "x",
+            "severity": "apocalyptic",
+            "confidence": 0.5,
+            "attack_pattern": "x",
+            "recommended_action": "x",
+        }
+    )
+
+    assert analyze_events(_sample_events(), stub_router).severity == "low"
+
+
+def test_out_of_range_confidence_is_clamped(stub_router):
+    stub_router.set_reply(
+        {
+            "summary": "x",
+            "severity": "high",
+            "confidence": 42,
+            "attack_pattern": "x",
+            "recommended_action": "x",
+        }
+    )
+
+    assert analyze_events(_sample_events(), stub_router).confidence == 1.0
+
+
+def test_non_numeric_confidence_becomes_zero(stub_router):
+    stub_router.set_reply(
+        {
+            "summary": "x",
+            "severity": "high",
+            "confidence": "very sure",
+            "attack_pattern": "x",
+            "recommended_action": "x",
+        }
+    )
+
+    assert analyze_events(_sample_events(), stub_router).confidence == 0.0
+
+
+def test_system_prompt_comes_from_the_yaml_template(stub_router):
+    stub_router.set_reply(
+        {
+            "summary": "x",
+            "severity": "low",
+            "confidence": 0.0,
+            "attack_pattern": "x",
+            "recommended_action": "x",
+        }
+    )
+    analyze_events(_sample_events(), stub_router)
+
+    template = load_prompt(PROMPT_NAME, PROMPT_VERSION)
+    assert stub_router.calls[0].messages[0].content == template.system

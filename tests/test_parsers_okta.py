@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ai_soc_agent.parsers import parse_file, parse_okta_record
 
@@ -40,7 +40,7 @@ def test_parse_okta_successful_login():
     event = parse_okta_record(_record())
 
     assert event is not None
-    assert event.ts == datetime(2026, 7, 24, 2, 15, 1, 123000, tzinfo=timezone.utc)
+    assert event.ts == datetime(2026, 7, 24, 2, 15, 1, 123000, tzinfo=UTC)
     assert event.actor == "203.0.113.45"
     assert event.action == "okta_login"
     assert event.target == "alice@example.test"

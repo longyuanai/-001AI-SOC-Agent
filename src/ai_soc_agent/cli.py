@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ import click
 from rich.console import Console
 
 from ai_soc_agent import __version__
-from ai_soc_agent.analyzer import analyze_events
+from ai_soc_agent.config import BRUTE_FORCE_THRESHOLD
 from ai_soc_agent.correlator import detect_patterns
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.parsers import (
@@ -22,7 +23,6 @@ from ai_soc_agent.parsers import (
     parse_nginx_line,
     parse_okta_record,
 )
-from ai_soc_agent.reporter import render_markdown
 
 console = Console()
 _LOG_TYPES = ("sshd", "evtx", "nginx", "okta")
@@ -56,14 +56,30 @@ def _normalized_event(item: dict[str, Any], source: str) -> NormalizedEvent | No
     )
 
 
-def _payload_events(
-    payload: dict[str, Any], *, log_file: str | None = None
-) -> tuple[list[NormalizedEvent], int]:
-    source = str(payload.get("source", "sshd")).casefold()
+def _resolve_log_type(payload: dict[str, Any], log_type: str | None) -> str:
+    """Pick the parser: an explicit ``--log-type`` beats the payload's source."""
+    source = str(log_type or payload.get("source", "sshd")).casefold()
     if source not in _LOG_TYPES:
         raise click.ClickException(
             f"unsupported source {source!r}; expected one of {', '.join(_LOG_TYPES)}"
         )
+    return source
+
+
+def _brute_force_threshold(payload: dict[str, Any]) -> int:
+    threshold = payload.get("brute_force_threshold", BRUTE_FORCE_THRESHOLD)
+    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
+        raise click.ClickException("'brute_force_threshold' must be a positive integer")
+    return threshold
+
+
+def _payload_events(
+    payload: dict[str, Any],
+    *,
+    log_file: str | None = None,
+    log_type: str | None = None,
+) -> tuple[list[NormalizedEvent], int]:
+    source = _resolve_log_type(payload, log_type)
 
     requested_file = log_file or payload.get("log_file") or payload.get("path")
     if requested_file is not None:
@@ -72,9 +88,7 @@ def _payload_events(
         path = Path(requested_file)
         if not path.is_file():
             raise click.ClickException(f"log file does not exist: {requested_file}")
-        parsed = parse_file(str(path), log_type=source)
-        threshold = _brute_force_threshold(payload)
-        return parsed, threshold
+        return parse_file(str(path), log_type=source), _brute_force_threshold(payload)
 
     raw_events = payload.get("events", [])
     if not isinstance(raw_events, list):
@@ -100,13 +114,6 @@ def _payload_events(
     return parsed, _brute_force_threshold(payload)
 
 
-def _brute_force_threshold(payload: dict[str, Any]) -> int:
-    threshold = payload.get("brute_force_threshold", 5)
-    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
-        raise click.ClickException("'brute_force_threshold' must be a positive integer")
-    return threshold
-
-
 def _parse_raw_event(raw: str, source: str) -> NormalizedEvent | None:
     if source == "sshd":
         return parse_line(raw)
@@ -124,18 +131,18 @@ def _parse_raw_event(raw: str, source: str) -> NormalizedEvent | None:
 
 
 def scan_payload(
-    payload: dict[str, Any], *, log_file: str | None = None
+    payload: dict[str, Any],
+    *,
+    log_file: str | None = None,
+    log_type: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Convert an IntegrationGateway payload into its Finding envelope."""
-    events, threshold = _payload_events(payload, log_file=log_file)
-    findings = detect_patterns(
-        events,
-        facts={"brute_force_threshold": threshold},
-    )
+    events, threshold = _payload_events(payload, log_file=log_file, log_type=log_type)
+    findings = detect_patterns(events, facts={"brute_force_threshold": threshold})
     serialized = []
     for finding in findings:
         item = finding.to_dict()
-        item.pop("source")
+        item.pop("source", None)
         serialized.append(item)
     return {"findings": serialized}
 
@@ -155,10 +162,21 @@ def cli() -> None:
 @click.option(
     "--log-file",
     type=click.Path(exists=True, dir_okay=False),
-    help="Read events from a real log file; source defaults to sshd.",
+    help="Read events from a real log file.",
+)
+@click.option(
+    "--log-type",
+    type=click.Choice(_LOG_TYPES, case_sensitive=False),
+    default=None,
+    help="Input log format; overrides the payload's 'source'. Defaults to sshd.",
 )
 @click.option("--json", "json_output", is_flag=True, help="Emit a Finding JSON envelope.")
-def scan(input_json: str | None, log_file: str | None, json_output: bool) -> None:
+def scan(
+    input_json: str | None,
+    log_file: str | None,
+    log_type: str | None,
+    json_output: bool,
+) -> None:
     """Scan normalized or raw events without calling an LLM."""
     raw_payload = input_json
     if raw_payload is None and log_file is None:
@@ -177,7 +195,7 @@ def scan(input_json: str | None, log_file: str | None, json_output: bool) -> Non
     if not isinstance(payload, dict):
         raise click.ClickException("JSON payload must be an object")
 
-    envelope = scan_payload(payload, log_file=log_file)
+    envelope = scan_payload(payload, log_file=log_file, log_type=log_type)
     if json_output:
         click.echo(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
         return
@@ -206,9 +224,12 @@ def scan(input_json: str | None, log_file: str | None, json_output: bool) -> Non
 )
 def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> None:
     """Parse a log file and produce an incident report."""
-    import os
-
+    # Imported inside the command on purpose: `scan` and the API server must keep
+    # working in an image that has no LLM provider wired up.
     from shared_llm_core.router import LLMRouter
+
+    from ai_soc_agent.analyzer import AnalyzerError, analyze_events
+    from ai_soc_agent.reporter import render_markdown
 
     os.environ.setdefault("LLM_PROVIDERS", provider)
 
@@ -221,8 +242,11 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
         return
 
     console.print("[bold]Analyzing[/bold] via shared-llm-core ...")
-    with LLMRouter.from_env() as router:
-        assessment = analyze_events(events, router)
+    try:
+        with LLMRouter.from_env() as router:
+            assessment = analyze_events(events, router)
+    except AnalyzerError as exc:
+        raise click.ClickException(f"LLM triage failed: {exc}") from exc
 
     report = render_markdown(events, assessment, source_path=input_path)
     if output_path == "-":
@@ -233,14 +257,20 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
         console.print(f"[green]Wrote[/green] {output_path}")
 
 
+#: Handled by the group itself, so these must not be forwarded to ``scan``.
+_GROUP_OPTIONS = frozenset({"--help", "-h", "--version"})
+
+
 def main() -> None:
-    args = sys.argv[1:]
-    if args and args[0].startswith("-") and any(
-        arg in {"--json", "--input", "--log-file"}
-        or arg.startswith("--input=")
-        or arg.startswith("--log-file=")
-        for arg in args
-    ):
+    """Run the CLI, defaulting a bare option list to the ``scan`` subcommand.
+
+    ``python -m ai_soc_agent.cli --json`` is the documented gateway invocation.
+    Rather than sniffing for specific flag names — which broke whenever ``scan``
+    grew an option — anything that is neither a known subcommand nor a
+    group-level option is handed to ``scan``.
+    """
+    args = list(sys.argv[1:])
+    if args and args[0] not in cli.commands and args[0] not in _GROUP_OPTIONS:
         args.insert(0, "scan")
     cli.main(args=args, prog_name="python -m ai_soc_agent.cli")
 

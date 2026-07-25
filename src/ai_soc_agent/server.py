@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
+import hmac
+import logging
+import os
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Annotated, Any, Literal
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from ai_soc_agent import __version__
+from ai_soc_agent.config import MAX_RULE_WINDOW_SECONDS
 from ai_soc_agent.correlator import Alert, correlate
 from ai_soc_agent.normalizer import NormalizedEvent
+
+logger = logging.getLogger(__name__)
+
+#: Env var holding the bearer token required by /ingest and /alerts. Unset means
+#: the API is open, which is only appropriate on a trusted loopback interface.
+API_TOKEN_ENV = "AI_SOC_API_TOKEN"
 
 
 class EventIn(BaseModel):
@@ -72,16 +83,72 @@ def _payload_events(payload: IngestPayload) -> list[EventIn]:
     return payload
 
 
-def create_app(*, max_events: int = 10_000) -> FastAPI:
+def _utc(value: datetime) -> datetime:
+    """Treat naive timestamps as UTC; ELK and Splunk disagree on sending them."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _correlation_slice(events: list[NormalizedEvent]) -> list[NormalizedEvent]:
+    """Return only the history a rule can still match on.
+
+    ``/ingest`` used to re-correlate the entire 10k-event store on every request,
+    so cost grew with uptime. No rule looks back further than
+    ``MAX_RULE_WINDOW_SECONDS``, so older events cannot change the outcome.
+    """
+    if not events:
+        return []
+    cutoff = max(_utc(event.ts) for event in events).timestamp() - MAX_RULE_WINDOW_SECONDS
+    return [event for event in events if _utc(event.ts).timestamp() >= cutoff]
+
+
+def _merge(existing: Alert, incoming: Alert) -> Alert:
+    """Widen a stored alert with a later observation of the same incident."""
+    return replace(
+        incoming,
+        first_seen=min(existing.first_seen, incoming.first_seen, key=_utc),
+        last_seen=max(existing.last_seen, incoming.last_seen, key=_utc),
+        event_count=max(existing.event_count, incoming.event_count),
+        targets=tuple(sorted(set(existing.targets) | set(incoming.targets))),
+        sources=tuple(sorted(set(existing.sources) | set(incoming.sources))),
+    )
+
+
+def _token_guard(expected: str | None):
+    """Build the bearer-token dependency for one app instance."""
+
+    def guard(authorization: Annotated[str | None, Header()] = None) -> None:
+        if expected is None:
+            return
+        scheme, _, presented = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(presented, expected):
+            raise HTTPException(
+                status_code=401,
+                detail="missing or invalid bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    return guard
+
+
+def create_app(*, max_events: int = 10_000, api_token: str | None = None) -> FastAPI:
     """Create an isolated API application with an in-memory event store."""
     if max_events <= 0:
         raise ValueError("max_events must be positive")
 
-    app = FastAPI(title="AI-SOC-Agent", version="0.1.0")
+    expected_token = api_token or os.environ.get(API_TOKEN_ENV) or None
+    if expected_token is None:
+        logger.warning(
+            "%s is not set: /ingest and /alerts accept unauthenticated requests. "
+            "Keep the port on loopback or set a token before exposing it.",
+            API_TOKEN_ENV,
+        )
+
+    app = FastAPI(title="AI-SOC-Agent", version=__version__)
     store = _Store(max_events=max_events)
     app.state.store = store
+    require_token = Depends(_token_guard(expected_token))
 
-    @app.post("/ingest", status_code=202)
+    @app.post("/ingest", status_code=202, dependencies=[require_token])
     def ingest(payload: Annotated[IngestPayload, Body()]) -> dict[str, Any]:
         incoming = _payload_events(payload)
         if not incoming:
@@ -94,10 +161,17 @@ def create_app(*, max_events: int = 10_000) -> FastAPI:
             store.events.extend(normalized)
             if len(store.events) > store.max_events:
                 del store.events[: len(store.events) - store.max_events]
+            recent = _correlation_slice(store.events)
 
-            correlated = correlate(store.events)
+        # Correlation deliberately runs outside the lock: it is the expensive
+        # part, and holding the lock across it serialized concurrent ingests.
+        correlated = correlate(recent)
+
+        with store.lock:
             created = [alert for alert in correlated if alert.id not in store.alerts]
-            store.alerts.update((alert.id, alert) for alert in created)
+            for alert in correlated:
+                stored = store.alerts.get(alert.id)
+                store.alerts[alert.id] = alert if stored is None else _merge(stored, alert)
             total_alerts = len(store.alerts)
 
         return {
@@ -107,7 +181,7 @@ def create_app(*, max_events: int = 10_000) -> FastAPI:
             "total_alerts": total_alerts,
         }
 
-    @app.get("/alerts")
+    @app.get("/alerts", dependencies=[require_token])
     def get_alerts(
         alert_type: Annotated[str | None, Query(alias="type")] = None,
         limit: Annotated[int, Query(ge=1, le=1_000)] = 100,
@@ -116,10 +190,25 @@ def create_app(*, max_events: int = 10_000) -> FastAPI:
             alerts = list(store.alerts.values())
         if alert_type is not None:
             alerts = [alert for alert in alerts if alert.kind == alert_type]
+        alerts.sort(key=lambda alert: (_utc(alert.first_seen), alert.kind, alert.id))
         selected = alerts[:limit]
         return {
             "count": len(selected),
             "alerts": [alert.to_dict() for alert in selected],
+        }
+
+    @app.get("/health")
+    def health() -> dict[str, Any]:
+        """Unauthenticated liveness probe; reports counters only, never events."""
+        with store.lock:
+            event_count = len(store.events)
+            alert_count = len(store.alerts)
+        return {
+            "status": "ok",
+            "version": __version__,
+            "events": event_count,
+            "alerts": alert_count,
+            "auth_required": expected_token is not None,
         }
 
     return app
@@ -129,10 +218,14 @@ app = create_app()
 
 
 def main() -> None:
-    """Run the development ASGI server."""
+    """Run the development ASGI server; loopback unless told otherwise."""
     import uvicorn
 
-    uvicorn.run("ai_soc_agent.server:app", host="0.0.0.0", port=8080)
+    uvicorn.run(
+        "ai_soc_agent.server:app",
+        host=os.environ.get("AI_SOC_HOST", "127.0.0.1"),
+        port=int(os.environ.get("AI_SOC_PORT", "8080")),
+    )
 
 
 if __name__ == "__main__":

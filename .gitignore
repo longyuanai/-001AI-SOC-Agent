@@ -10,7 +10,11 @@ venv/
 .pytest-tmp*/
 .ruff_cache/
 .uv-cache/
-*.json
-!configs/*.json
-*.log
-!samples/*.log
+
+# Only local run output is ignored. A blanket `*.json` / `*.log` ignore meant new
+# fixtures under tests/ and samples/ silently never got committed, which is why
+# samples/multi_source_demo.log is JSON wearing a .log extension.
+/*.json
+/*.log
+report.md
+audit.jsonl

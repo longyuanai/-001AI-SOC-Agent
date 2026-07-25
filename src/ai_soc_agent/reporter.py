@@ -50,9 +50,14 @@ def render_markdown(
     lines.append("| Timestamp | Source IP | Action | Target | Result |")
     lines.append("|-----------|-----------|--------|--------|--------|")
     for e in events[:10]:
-        lines.append(
-            f"| {e.ts.isoformat(timespec='seconds')} | {e.actor} | {e.action} | {e.target} | {e.result} |"
+        cells = (
+            e.ts.isoformat(timespec="seconds"),
+            e.actor,
+            e.action,
+            e.target,
+            e.result,
         )
+        lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
 
     return "\n".join(lines)

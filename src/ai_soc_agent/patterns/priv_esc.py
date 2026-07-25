@@ -6,11 +6,15 @@ from typing import Any
 
 from shared_llm_core.rule_engine import RuleContext
 
+from ai_soc_agent.config import PRIV_ESC_THRESHOLD, PRIV_ESC_WINDOW_SECONDS
 from ai_soc_agent.patterns.base import (
     SOCPattern,
     context_events,
+    count_windows,
     event_value,
-    first_group_window,
+    latest_event,
+    positive_int,
+    positive_number,
 )
 
 
@@ -31,24 +35,39 @@ def _is_failed_sudo(event: Any) -> bool:
 
 
 class PrivilegeEscalationRule(SOCPattern):
-    """Detect three failed sudo attempts by one user within two minutes."""
+    """Detect repeated failed sudo attempts by one user in a short window."""
 
     id = "001.mitre.t1548.privilege-escalation"
     tactic = "TA0004"
     technique = "T1548"
+    alert_kind = "privilege_escalation"
     confidence_default = 0.87
 
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        return first_group_window(
+    def _window_seconds(self, ctx: RuleContext) -> float | None:
+        return positive_number(
+            ctx.facts.get("priv_esc_window_seconds"), PRIV_ESC_WINDOW_SECONDS
+        )
+
+    def matched_event_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        threshold = positive_int(ctx.facts.get("priv_esc_threshold"), PRIV_ESC_THRESHOLD)
+        window_seconds = self._window_seconds(ctx)
+        if threshold is None or window_seconds is None:
+            return ()
+        return count_windows(
             context_events(ctx),
             group_key=_user,
             predicate=_is_failed_sudo,
-            threshold=3,
-            seconds=120,
+            threshold=threshold,
+            seconds=window_seconds,
         )
 
     def title(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        return f"Privilege escalation attempts by {_user(events[-1]) or ctx.subject}"
+        actor = _user(latest_event(events)) or ctx.subject
+        return f"Privilege escalation attempts by {actor}"
 
     def description(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
-        return f"{len(events)} failed sudo attempts occurred within 120 seconds."
+        window_seconds = int(self._window_seconds(ctx) or PRIV_ESC_WINDOW_SECONDS)
+        return f"{len(events)} failed sudo attempts occurred within {window_seconds} seconds."
+
+    def alert_actor(self, ctx: RuleContext, events: tuple[Any, ...]) -> str | None:
+        return _user(latest_event(events))

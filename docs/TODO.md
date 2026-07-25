@@ -1,6 +1,7 @@
 # 001 AI-SOC-Agent · v0.1 TODO
 
-> **项目状态**: PoC ✅ (15/15 tests passing)
+> **项目状态**: v0.5 · Phase-2 交付完成
+> **测试**: `poetry run pytest -q` (跨仓库用例在只 clone 本仓库时自动 skip)
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
 
@@ -8,14 +9,38 @@
 
 ## P0 · 本项目 v0.1 任务清单
 
-| ID | 任务 | 状态 | 启动日 | 完成日 | 备注 |
-|----|------|------|-------|-------|------|
-| PARSER-001 | 加 Windows Event Log 解析器 | pending | | | |
-| PARSER-002 | 加 Nginx access log 解析器 | pending | | | |
-| PARSER-003 | 加 Okta 登录日志解析器 | pending | | | |
-| DETECT-001 | 关联规则 (同 IP 5 分钟 10 次失败 → 告警) | pending | | | |
-| API-001 | FastAPI server (接 ELK / Splunk) | pending | | | |
-| DOCKER-001 | Dockerfile | pending | | | |
+| ID | 任务 | 状态 | 完成日 | 备注 |
+|----|------|------|-------|------|
+| PARSER-001 | 加 Windows Event Log 解析器 | done | 2026-07-24 | `parse_evtx_line` |
+| PARSER-002 | 加 Nginx access log 解析器 | done | 2026-07-24 | `parse_nginx_line` |
+| PARSER-003 | 加 Okta 登录日志解析器 | done | 2026-07-24 | `parse_okta_record` |
+| DETECT-001 | 关联规则 (同 IP 短窗口内多次失败 → 告警) | done | 2026-07-24 | `BruteForceBurstRule`；阈值见 `config.py` |
+| API-001 | FastAPI server (接 ELK / Splunk) | done | 2026-07-24 | `/ingest` `/alerts` `/health` |
+| DOCKER-001 | Dockerfile | done | 2026-07-24 | 多阶段 slim 镜像 |
+
+## P0 · Phase-2 修复批次 (2026-07-25)
+
+| ID | 任务 | 状态 | 备注 |
+|----|------|------|------|
+| FIX-001 | 5 条规则全部进 `/alerts` | done | 告警元数据下沉到 `SOCPattern`；`finding_to_alert` 不再静默丢弃 |
+| FIX-002 | 每条规则支持多命中 | done | `count_windows` / `distinct_windows` 按分组各出一条 |
+| FIX-003 | 阈值收敛到单一来源 | done | `config.py` 两个具名 profile |
+| FIX-004 | 删掉死代码关联函数 | done | `detect_brute_force` / `detect_credential_stuffing` 移除，测试改测 `correlate()` |
+| FIX-005 | `/ingest` 有界关联 + 稳定告警 id | done | 只关联 `MAX_RULE_WINDOW_SECONDS` 窗口；锁外跑关联 |
+| FIX-006 | API 鉴权 | done | `AI_SOC_API_TOKEN` bearer token |
+| FIX-007 | prompt 单一副本 | done | `prompts.py` 加载 yml，analyzer 里的硬编码副本删除 |
+| FIX-008 | LLM 返回容错 | done | `AnalyzerError`，不再裸抛 `JSONDecodeError` |
+| FIX-009 | `scan --log-type` | done | 非 sshd 输入不再静默解析成 0 事件 |
+| FIX-010 | CI + 依赖声明 | done | `.github/workflows/ci.yml`；httpx / ruff / pyyaml 进 pyproject |
+| FIX-011 | 混合时区批次崩溃 | done | `detect_patterns` 里 min/max 前统一按 UTC 归一 |
+| FIX-012 | AUDIT S1 nit 1/2/3 全部清掉 | done | `--basetemp` 去掉；cli 顶层 import；`--log-type` 显式 |
+
+### 已知未闭环
+
+- `tests/integration/` 与 `tests/test_cli_envelope.py` 依赖 `000shared-integration`，
+  只 clone 本仓库时 skip。CI 里靠 `SHARED_INTEGRATION_REPO` 变量启用。
+- nginx / okta 的 401 事件 `action` 是 `http_request`，不含 `login`，因此不会触发
+  T1110。要覆盖 Web 登录爆破需要在解析器里区分登录端点，留到 v0.6。
 
 ---
 

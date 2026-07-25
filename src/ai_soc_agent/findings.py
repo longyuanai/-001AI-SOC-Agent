@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from ipaddress import IPv4Address, ip_address
-from typing import Any, Mapping
+from typing import Any
 
 from shared_llm_core.finding import Finding, FindingSeverity, FindingSource
 

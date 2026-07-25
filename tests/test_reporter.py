@@ -9,7 +9,9 @@ from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.reporter import render_markdown
 
 
-def _event(result: str = "failure", actor: str = "1.2.3.4", target: str = "root") -> NormalizedEvent:
+def _event(
+    result: str = "failure", actor: str = "1.2.3.4", target: str = "root"
+) -> NormalizedEvent:
     return NormalizedEvent(
         ts=datetime(2026, 7, 23, 22, 1, 14),
         actor=actor,

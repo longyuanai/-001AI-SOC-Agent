@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ai_soc_agent.parsers import parse_evtx_line, parse_file
 
@@ -35,7 +35,7 @@ def test_parse_evtx_4625_failure():
     )
 
     assert event is not None
-    assert event.ts == datetime(2026, 7, 24, 1, 2, 3, tzinfo=timezone.utc)
+    assert event.ts == datetime(2026, 7, 24, 1, 2, 3, tzinfo=UTC)
     assert event.actor == "203.0.113.45"
     assert event.target == "administrator"
     assert event.action == "windows_login"

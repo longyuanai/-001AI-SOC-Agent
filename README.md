@@ -21,13 +21,26 @@ auth.log ──► Parser ──► NormalizedEvent[*] ──► LLM Router (sha
 
 ## Install
 
+`shared-llm-core` is a `path` dependency on `../000shared-llm-core`, so this
+project cannot be installed from a standalone clone. Check both repos out side
+by side under their common parent first:
+
+```
+003AI+网络安全/
+├── 000shared-llm-core/       # required: path dependency
+├── 000shared-integration/    # optional: enables the cross-repo suite tests
+└── 001AI-SOC-Agent/          # this repo
+```
+
 ```bash
 cd 001AI-SOC-Agent
 poetry install
 ```
 
-This pulls `shared-llm-core` from the sibling repo at
-`../000shared-llm-core` via a `path` dependency.
+CI does the same thing — see `.github/workflows/ci.yml`. If the sibling repos
+live under different names, point the `SHARED_LLM_CORE_REPO` /
+`SHARED_INTEGRATION_REPO` Actions variables at them (and add a
+`SUITE_REPO_TOKEN` secret if they are private).
 
 ## Run the demo
 
@@ -55,14 +68,36 @@ recognizable events" — handy for CI smoke tests.
 ## Test
 
 ```bash
-poetry run pytest -v
+poetry run pytest -q
+poetry run ruff check src tests
 ```
 
-All tests use a stubbed router; no live LLM is required.
+All tests use a stubbed router; no live LLM is required. Tests that need
+`000shared-integration` skip themselves when it is not checked out, so a
+partial checkout reports skips instead of collection errors.
+
+## Detection profiles
+
+Thresholds live in `src/ai_soc_agent/config.py`, and there are exactly two
+profiles so the same log cannot silently score differently per entry point:
+
+| Profile | Used by | Brute force |
+|---------|---------|-------------|
+| `detection_facts()` (default) | CLI `scan`, IntegrationGateway adapter | 5 failures / 60 s |
+| `STREAMING_PROFILE` | `correlate()` behind `/ingest` | 10 failures / 300 s |
+
+The streaming path sees a continuous firehose and deliberately runs the less
+twitchy threshold. Per-request tuning goes in the payload
+(`brute_force_threshold`), not in a new literal.
+
+All five MITRE patterns (T1110, T1110.004, T1078, T1548, T1021) surface both as
+v0.5 Findings and as `/alerts` entries. Each pattern reports one finding per
+independent match, so three IPs brute-forcing at once yield three findings.
 
 ## API server
 
-Run the webhook API locally:
+Run the webhook API locally. It binds `127.0.0.1` by default; override with
+`AI_SOC_HOST` / `AI_SOC_PORT`.
 
 ```bash
 python -m ai_soc_agent.server
@@ -70,7 +105,24 @@ curl -H "Content-Type: application/json" \
   --data-binary @samples/multi_source_demo.log \
   http://127.0.0.1:8080/ingest
 curl http://127.0.0.1:8080/alerts
+curl http://127.0.0.1:8080/health
 ```
+
+**Authentication.** Set `AI_SOC_API_TOKEN` and `/ingest` and `/alerts` require
+`Authorization: Bearer <token>`. Leave it unset only on a trusted loopback
+interface — the server logs a warning at startup when it is missing. `/health`
+is always unauthenticated so container probes keep working.
+
+```bash
+export AI_SOC_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+python -m ai_soc_agent.server
+curl -H "Authorization: Bearer $AI_SOC_API_TOKEN" http://127.0.0.1:8080/alerts
+```
+
+`/ingest` keeps a bounded in-memory store and re-correlates only the window a
+rule can still match (`config.MAX_RULE_WINDOW_SECONDS`), so cost does not grow
+with uptime. Alert ids are derived from `(type, actor)`, so replaying the same
+events updates one alert instead of creating duplicates.
 
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
@@ -93,6 +145,10 @@ echo '{"source":"sshd","events":[]}' | \
 
 python -m ai_soc_agent.cli scan \
   --log-file tests/fixtures/sshd_bruteforce.log --json
+
+# Non-sshd input needs --log-type, or it is parsed as sshd and yields nothing.
+python -m ai_soc_agent.cli scan \
+  --log-file samples/nginx_access.log --log-type nginx --json
 ```
 
 Start the suite gateway from `000shared-integration`, then use the frozen
@@ -111,15 +167,30 @@ curl -H "Content-Type: application/json" \
 ```
 001AI-SOC-Agent/
 ├── src/ai_soc_agent/
-│   ├── __init__.py        # public API
+│   ├── __init__.py        # public API (LLM exports are lazy)
+│   ├── config.py          # detection thresholds + profiles
 │   ├── normalizer.py      # NormalizedEvent dataclass
-│   ├── parsers.py         # OpenSSH auth.log parser
+│   ├── parsers.py         # sshd / evtx / nginx / okta parsers
+│   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
+│   │   ├── base.py        # SOCPattern: windowing + Finding construction
+│   │   ├── brute_force.py         # T1110
+│   │   ├── credential_stuffing.py # T1110.004
+│   │   ├── geo_anomaly.py         # T1078
+│   │   ├── lateral_movement.py    # T1021
+│   │   └── priv_esc.py            # T1548
+│   ├── correlator.py      # rule engine entry point + Alert projection
+│   ├── findings.py        # v0.5 Finding construction helpers
+│   ├── adapter.py         # SOCProductAdapter for IntegrationGateway
+│   ├── prompts.py         # loader for prompts/<task>/<version>.yml
 │   ├── analyzer.py        # LLM triage (single-shot JSON)
 │   ├── reporter.py        # Markdown report renderer
-│   └── cli.py             # Click CLI: ai-soc analyze
-├── prompts/incident_triage/v1.yml
-├── samples/ssh_bruteforce.log
+│   ├── server.py          # FastAPI /ingest, /alerts, /health
+│   └── cli.py             # Click CLI: ai-soc scan | analyze
+├── prompts/incident_triage/v1.yml   # the only copy of the triage prompt
+├── samples/               # sshd, nginx, okta, windows + samples/mitre/
 ├── tests/
+│   └── integration/       # needs the sibling suite repos; skips without them
+├── .github/workflows/ci.yml
 └── pyproject.toml
 ```
 

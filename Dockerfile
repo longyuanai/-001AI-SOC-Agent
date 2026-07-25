@@ -28,7 +28,9 @@ RUN python -m pip install --no-cache-dir --no-deps /wheels/*.whl \
 USER 65532:65532
 EXPOSE 8080
 
+# Probes /health, not /alerts: /alerts requires the bearer token when
+# AI_SOC_API_TOKEN is set, which would make a healthy container report 401.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/alerts', timeout=2)"]
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
 
 CMD ["uvicorn", "ai_soc_agent.server:app", "--host", "0.0.0.0", "--port", "8080"]
