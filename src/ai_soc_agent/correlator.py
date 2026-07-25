@@ -295,9 +295,7 @@ def correlate(
     events: list[NormalizedEvent], *, config: DetectionConfig | None = None
 ) -> list[Alert]:
     """Run compatibility Alert output through the Phase-2 RuleEngine."""
-    settings = config if config is not None else DetectionConfig(
-        brute_force_threshold=10, brute_force_window_seconds=300.0
-    )
+    settings = config if config is not None else DetectionConfig.for_stream()
     findings = detect_patterns(
         events,
         facts={

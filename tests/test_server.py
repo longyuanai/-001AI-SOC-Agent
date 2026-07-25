@@ -38,9 +38,11 @@ def test_ingest_batch_creates_and_lists_alerts():
     assert ingest_response.json()["alerts_created"] == 2
     assert alerts_response.status_code == 200
     assert alerts_response.json()["count"] == 2
+    assert alerts_response.json()["total"] == 2
+    # Most recent first: credential stuffing ends at 01:07, brute force at 01:03.
     assert [item["type"] for item in alerts_response.json()["alerts"]] == [
-        "brute_force",
         "credential_stuffing",
+        "brute_force",
     ]
 
 
@@ -96,6 +98,10 @@ def test_create_app_isolates_state_and_enforces_batch_limit():
         json={"event": _fixture_payload()["events"][0]},
     )
 
-    assert _request(isolated, "GET", "/alerts").json() == {"count": 0, "alerts": []}
+    assert _request(isolated, "GET", "/alerts").json() == {
+        "count": 0,
+        "total": 0,
+        "alerts": [],
+    }
     response = _request(isolated, "POST", "/ingest", json=_fixture_payload())
     assert response.status_code == 413

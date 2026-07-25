@@ -29,7 +29,8 @@ def test_dockerfile_runs_api_as_non_root():
 
 def test_dockerfile_has_healthcheck_and_no_embedded_credentials():
     assert "HEALTHCHECK" in DOCKERFILE
-    assert "http://127.0.0.1:8080/alerts" in DOCKERFILE
+    # /health is cheap; /alerts serialized the whole store on every probe.
+    assert "http://127.0.0.1:8080/health" in DOCKERFILE
     assert "API_KEY" not in DOCKERFILE
     assert "PASSWORD" not in DOCKERFILE
     assert "TOKEN" not in DOCKERFILE

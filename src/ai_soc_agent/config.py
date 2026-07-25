@@ -17,8 +17,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Batch mode: "here is a log file / event batch, tell me what is in it". Tuned
+# for fast bursts, and the default the CLI and gateway adapter use.
 DEFAULT_BRUTE_FORCE_THRESHOLD = 5
 DEFAULT_BRUTE_FORCE_WINDOW_SECONDS = 60.0
+
+# Stream mode: the continuous /ingest pipeline. Matches the correlation rule
+# documented in docs/tech-spec.md §1 — 10 failures from one IP in 5 minutes.
+DEFAULT_STREAM_BRUTE_FORCE_THRESHOLD = 10
+DEFAULT_STREAM_BRUTE_FORCE_WINDOW_SECONDS = 300.0
 DEFAULT_PRIV_ESC_THRESHOLD = 3
 DEFAULT_PRIV_ESC_WINDOW_SECONDS = 120.0
 DEFAULT_LATERAL_HOST_THRESHOLD = 3
@@ -112,19 +119,32 @@ class DetectionConfig:
     suppression: Suppression = field(default_factory=Suppression)
 
     @classmethod
-    def from_env(cls) -> "DetectionConfig":
+    def from_env(
+        cls,
+        *,
+        brute_force_threshold: int = DEFAULT_BRUTE_FORCE_THRESHOLD,
+        brute_force_window_seconds: float = DEFAULT_BRUTE_FORCE_WINDOW_SECONDS,
+    ) -> "DetectionConfig":
         """Build from ``SOC_*`` environment variables, falling back to defaults."""
         return cls(
             brute_force_threshold=int(
-                _env_number("BRUTE_FORCE_THRESHOLD", DEFAULT_BRUTE_FORCE_THRESHOLD)
+                _env_number("BRUTE_FORCE_THRESHOLD", brute_force_threshold)
             ),
             brute_force_window_seconds=_env_number(
-                "BRUTE_FORCE_WINDOW_SECONDS", DEFAULT_BRUTE_FORCE_WINDOW_SECONDS
+                "BRUTE_FORCE_WINDOW_SECONDS", brute_force_window_seconds
             ),
             credential_stuffing_window_seconds=_env_number(
                 "CREDENTIAL_STUFFING_WINDOW_SECONDS", DEFAULT_CROSS_SOURCE_WINDOW_SECONDS
             ),
             suppression=Suppression.from_env(),
+        )
+
+    @classmethod
+    def for_stream(cls) -> "DetectionConfig":
+        """Tuning for the continuous /ingest pipeline (tech-spec §1)."""
+        return cls.from_env(
+            brute_force_threshold=DEFAULT_STREAM_BRUTE_FORCE_THRESHOLD,
+            brute_force_window_seconds=DEFAULT_STREAM_BRUTE_FORCE_WINDOW_SECONDS,
         )
 
     def as_facts(self) -> dict[str, Any]:

@@ -18,19 +18,11 @@ class SOCProductAdapter(ProductAdapter):
         from ai_soc_agent.cli import scan_payload
 
         envelope = scan_payload(payload)
-        events = payload.get("events", [])
-        input_evidence = (
-            tuple(str(event) for event in events) if isinstance(events, list) else ()
-        )
-
+        # Each finding already carries the events that matched it; appending the
+        # entire input batch to every finding made a 10k-event scan emit 10k
+        # evidence strings per finding.
         for item in envelope["findings"]:
-            existing_evidence = item.get("evidence", [])
-            normalized = {
-                **item,
-                "source": self.source.value,
-                "evidence": [*existing_evidence, *input_evidence],
-            }
-            yield Finding.from_dict(normalized)
+            yield Finding.from_dict({**item, "source": self.source.value})
 
     def health(self) -> dict[str, Any]:
         """Return the product status exposed by IntegrationGateway health."""

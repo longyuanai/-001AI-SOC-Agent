@@ -2,16 +2,33 @@
 
 from __future__ import annotations
 
+import hmac
+import logging
+import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Lock
 from typing import Annotated, Any, Literal
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from ai_soc_agent import __version__
+from ai_soc_agent.config import DetectionConfig
 from ai_soc_agent.correlator import Alert, correlate
 from ai_soc_agent.normalizer import NormalizedEvent
+
+logger = logging.getLogger(__name__)
+
+# Widest rule window (geo anomaly, 24h). Events older than this relative to the
+# newest event cannot contribute to a new alert, so they need not be re-scanned.
+CORRELATION_HORIZON = timedelta(days=1)
+
+# Upper bound on how many recent events one /ingest re-correlates. Without it,
+# every request rescanned the entire store and cost grew with store size.
+DEFAULT_MAX_CORRELATION_EVENTS = 5_000
+DEFAULT_MAX_ALERTS = 5_000
+DEFAULT_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
 
 class EventIn(BaseModel):
@@ -57,8 +74,10 @@ IngestPayload = EventBatch | SplunkEnvelope | list[EventIn] | EventIn
 @dataclass
 class _Store:
     max_events: int
+    max_alerts: int
+    max_correlation_events: int
     events: list[NormalizedEvent] = field(default_factory=list)
-    alerts: dict[str, Alert] = field(default_factory=dict)
+    alerts: dict[tuple[str, str], Alert] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
 
@@ -72,16 +91,89 @@ def _payload_events(payload: IngestPayload) -> list[EventIn]:
     return payload
 
 
-def create_app(*, max_events: int = 10_000) -> FastAPI:
+def _identity(alert: Alert) -> tuple[str, str]:
+    """Stable key for one ongoing incident.
+
+    ``Alert.id`` hashes first_seen/last_seen, so a sustained attack minted a new
+    id on every ingest and the store filled with near-duplicates. Dedupe on the
+    thing that actually identifies the incident instead.
+    """
+    return (alert.kind, alert.actor)
+
+
+def _correlation_slice(store: _Store) -> list[NormalizedEvent]:
+    """Return the recent events worth re-correlating."""
+    if not store.events:
+        return []
+    recent = store.events[-store.max_correlation_events :]
+    horizon = max(event.ts for event in recent) - CORRELATION_HORIZON
+    return [event for event in recent if event.ts >= horizon]
+
+
+def create_app(
+    *,
+    max_events: int = 10_000,
+    max_alerts: int = DEFAULT_MAX_ALERTS,
+    max_correlation_events: int = DEFAULT_MAX_CORRELATION_EVENTS,
+    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
+    api_token: str | None = None,
+    config: DetectionConfig | None = None,
+) -> FastAPI:
     """Create an isolated API application with an in-memory event store."""
     if max_events <= 0:
         raise ValueError("max_events must be positive")
+    if max_alerts <= 0:
+        raise ValueError("max_alerts must be positive")
+    if max_correlation_events <= 0:
+        raise ValueError("max_correlation_events must be positive")
 
-    app = FastAPI(title="AI-SOC-Agent", version="0.1.0")
-    store = _Store(max_events=max_events)
+    token = api_token if api_token is not None else os.environ.get("SOC_API_TOKEN")
+    settings = config if config is not None else DetectionConfig.for_stream()
+
+    app = FastAPI(title="AI-SOC-Agent", version=__version__)
+    store = _Store(
+        max_events=max_events,
+        max_alerts=max_alerts,
+        max_correlation_events=max_correlation_events,
+    )
     app.state.store = store
+    app.state.config = settings
 
-    @app.post("/ingest", status_code=202)
+    def require_token(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        """Reject unauthenticated writes when SOC_API_TOKEN is configured."""
+        if not token:
+            return
+        supplied = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            supplied = authorization[7:]
+        if not hmac.compare_digest(supplied, token):
+            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+    @app.middleware("http")
+    async def limit_body_size(request: Request, call_next):
+        """Reject oversized bodies before they are buffered into memory."""
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > max_request_bytes:
+            return _json_error(413, "request body exceeds limit")
+        return await call_next(request)
+
+    @app.get("/health")
+    def health() -> dict[str, Any]:
+        """Liveness probe that does not serialize the alert store."""
+        with store.lock:
+            events = len(store.events)
+            alerts = len(store.alerts)
+        return {
+            "status": "ok",
+            "product": "001-soc",
+            "version": __version__,
+            "events": events,
+            "alerts": alerts,
+        }
+
+    @app.post("/ingest", status_code=202, dependencies=[Depends(require_token)])
     def ingest(payload: Annotated[IngestPayload, Body()]) -> dict[str, Any]:
         incoming = _payload_events(payload)
         if not incoming:
@@ -90,16 +182,38 @@ def create_app(*, max_events: int = 10_000) -> FastAPI:
             raise HTTPException(status_code=413, detail="event batch exceeds in-memory limit")
 
         normalized = [item.to_event() for item in incoming]
+
+        # Snapshot under the lock, correlate outside it: correlation is the
+        # expensive part and holding the lock across it serialized every request.
         with store.lock:
             store.events.extend(normalized)
             if len(store.events) > store.max_events:
                 del store.events[: len(store.events) - store.max_events]
+            candidates = _correlation_slice(store)
 
-            correlated = correlate(store.events)
-            created = [alert for alert in correlated if alert.id not in store.alerts]
-            store.alerts.update((alert.id, alert) for alert in created)
+        correlated = correlate(candidates, config=settings)
+
+        with store.lock:
+            created: list[Alert] = []
+            for alert in correlated:
+                identity = _identity(alert)
+                previous = store.alerts.get(identity)
+                if previous is None:
+                    created.append(alert)
+                elif alert.event_count <= previous.event_count:
+                    continue
+                store.alerts[identity] = alert
+            while len(store.alerts) > store.max_alerts:
+                store.alerts.pop(next(iter(store.alerts)))
             total_alerts = len(store.alerts)
 
+        logger.info(
+            "ingested events=%d correlated=%d new_alerts=%d total_alerts=%d",
+            len(normalized),
+            len(candidates),
+            len(created),
+            total_alerts,
+        )
         return {
             "accepted": len(normalized),
             "alerts_created": len(created),
@@ -110,19 +224,33 @@ def create_app(*, max_events: int = 10_000) -> FastAPI:
     @app.get("/alerts")
     def get_alerts(
         alert_type: Annotated[str | None, Query(alias="type")] = None,
+        severity: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=1_000)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, Any]:
         with store.lock:
             alerts = list(store.alerts.values())
         if alert_type is not None:
             alerts = [alert for alert in alerts if alert.kind == alert_type]
-        selected = alerts[:limit]
+        if severity is not None:
+            alerts = [alert for alert in alerts if alert.severity == severity]
+        # Most recent first: insertion order buried an active incident under
+        # whatever happened to be ingested earliest.
+        alerts.sort(key=lambda alert: (alert.last_seen, alert.kind, alert.id), reverse=True)
+        selected = alerts[offset : offset + limit]
         return {
             "count": len(selected),
+            "total": len(alerts),
             "alerts": [alert.to_dict() for alert in selected],
         }
 
     return app
+
+
+def _json_error(status_code: int, detail: str):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=status_code, content={"detail": detail})
 
 
 app = create_app()
@@ -132,7 +260,20 @@ def main() -> None:
     """Run the development ASGI server."""
     import uvicorn
 
-    uvicorn.run("ai_soc_agent.server:app", host="0.0.0.0", port=8080)
+    logging.basicConfig(
+        level=os.environ.get("SOC_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    if not os.environ.get("SOC_API_TOKEN"):
+        logger.warning(
+            "SOC_API_TOKEN is unset: /ingest accepts unauthenticated writes. "
+            "Set it before exposing this server beyond localhost."
+        )
+    uvicorn.run(
+        "ai_soc_agent.server:app",
+        host=os.environ.get("SOC_HOST", "127.0.0.1"),
+        port=int(os.environ.get("SOC_PORT", "8080")),
+    )
 
 
 if __name__ == "__main__":

@@ -97,6 +97,23 @@ def test_adapter_evidence_contains_original_event() -> None:
     assert str(event) in finding.evidence
 
 
+def test_adapter_evidence_does_not_grow_with_unrelated_events() -> None:
+    """Evidence must describe the match, not restate the whole submission."""
+    attack = _failed_lines(5)
+    noise = [
+        (
+            f"Jul 24 02:00:{index % 60:02d} soc-host sshd[{2000 + index}]: "
+            f"Accepted password for alice from 192.0.2.{index % 250} port 22 ssh2"
+        )
+        for index in range(200)
+    ]
+
+    finding = _scan({"source": "sshd", "events": [*attack, *noise]})[0]
+
+    assert len(finding.evidence) == len(attack)
+    assert all("Failed password" in item for item in finding.evidence)
+
+
 def test_adapter_payload_without_events_returns_no_findings() -> None:
     assert _scan({"source": "sshd"}) == []
 

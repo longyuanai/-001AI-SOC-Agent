@@ -44,6 +44,10 @@ def _normalized_event(item: dict[str, Any], source: str) -> NormalizedEvent | No
     extra = item.get("extra", {})
     if not isinstance(extra, dict):
         raise click.ClickException("normalized event 'extra' must be an object")
+    # Fall back to the submitted payload so evidence stays traceable to what
+    # the caller actually sent. Without it the adapter had to staple the whole
+    # input batch onto every finding.
+    raw = item.get("raw")
     return NormalizedEvent(
         ts=_parse_timestamp(item["ts"]),
         actor=str(item["actor"]),
@@ -51,7 +55,7 @@ def _normalized_event(item: dict[str, Any], source: str) -> NormalizedEvent | No
         target=str(item["target"]),
         result=str(item["result"]),
         source=str(item.get("source", source)),
-        raw=str(item.get("raw", "")),
+        raw=str(raw) if raw not in (None, "") else str(item),
         extra=extra,
     )
 
