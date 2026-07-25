@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,7 +31,9 @@ def test_parse_failed_password():
     assert ev.action == "ssh_login"
     assert ev.source == "sshd"
     assert ev.extra["port"] == 22
-    assert ev.ts == datetime(2026, 7, 23, 22, 1, 14)
+    # syslog carries no offset; the normalizer pins it to UTC so sshd events
+    # stay comparable with the tz-aware evtx/nginx/okta sources.
+    assert ev.ts == datetime(2026, 7, 23, 22, 1, 14, tzinfo=UTC)
 
 
 def test_parse_accepted_password():

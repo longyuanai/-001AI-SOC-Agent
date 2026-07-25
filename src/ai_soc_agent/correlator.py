@@ -12,8 +12,9 @@ from typing import Any
 from shared_llm_core.finding import Finding
 from shared_llm_core.rule_engine import RuleContext, RuleEngine
 
-from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.normalizer import NormalizedEvent, ensure_utc
 from ai_soc_agent.patterns import build_pattern_engine
+from ai_soc_agent.patterns.base import event_timestamp
 
 
 @dataclass(frozen=True)
@@ -260,11 +261,15 @@ def detect_patterns(
     merged_facts: dict[str, Any] = {"events": tuple(events)}
     if facts:
         merged_facts.update(facts)
-    timestamps = [event.ts for event in events]
+    # Events may arrive as dicts from the gateway and with mixed tz-awareness,
+    # so normalize before comparing instead of calling min()/max() directly.
+    timestamps = sorted(
+        (ensure_utc(ts) for event in events if (ts := event_timestamp(event)) is not None),
+    )
     context = RuleContext(
         subject="soc-event-stream",
         facts=merged_facts,
-        window=(min(timestamps), max(timestamps)) if timestamps else None,
+        window=(timestamps[0], timestamps[-1]) if timestamps else None,
     )
     selected_engine = engine if engine is not None else build_pattern_engine()
     return selected_engine.evaluate(context)
