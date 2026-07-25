@@ -12,9 +12,10 @@ from typing import Any
 from shared_llm_core.finding import Finding
 from shared_llm_core.rule_engine import RuleContext, RuleEngine
 
+from ai_soc_agent.config import DetectionConfig
 from ai_soc_agent.normalizer import NormalizedEvent, ensure_utc
 from ai_soc_agent.patterns import build_pattern_engine
-from ai_soc_agent.patterns.base import event_timestamp
+from ai_soc_agent.patterns.base import event_timestamp, source_family
 
 
 @dataclass(frozen=True)
@@ -167,24 +168,13 @@ def detect_brute_force(
     return alerts
 
 
-def _source_family(event: NormalizedEvent) -> str:
-    source = event.source.strip().casefold()
-    if source in {"ssh", "sshd"} or "ssh" in source:
-        return "ssh"
-    if source == "vpn" or "vpn" in source:
-        return "vpn"
-    if source in {"nginx", "okta", "web", "http", "https"}:
-        return "web"
-    return source
-
-
 def _event_user(event: NormalizedEvent) -> str | None:
     for key in ("user", "username", "remote_user", "account"):
         value = event.extra.get(key)
         if isinstance(value, str) and value not in ("", "-", "unknown"):
             return value.strip().casefold()
 
-    if _source_family(event) == "web" and event.target.startswith("/"):
+    if source_family(event) == "web" and event.target.startswith("/"):
         return None
     if event.target in ("", "-", "unknown"):
         return None
@@ -208,7 +198,7 @@ def detect_credential_stuffing(
         if event.result != "failure":
             continue
         user = _event_user(event)
-        family = _source_family(event)
+        family = source_family(event)
         if user is not None and family in required_families:
             failures.append((_utc_timestamp(event.ts), event, user, family))
     failures.sort(key=lambda item: item[0])
@@ -301,15 +291,18 @@ def _finding_to_alert(finding: Finding) -> Alert | None:
     )
 
 
-def correlate(events: list[NormalizedEvent]) -> list[Alert]:
+def correlate(
+    events: list[NormalizedEvent], *, config: DetectionConfig | None = None
+) -> list[Alert]:
     """Run compatibility Alert output through the Phase-2 RuleEngine."""
+    settings = config if config is not None else DetectionConfig(
+        brute_force_threshold=10, brute_force_window_seconds=300.0
+    )
     findings = detect_patterns(
         events,
         facts={
-            "brute_force_threshold": 10,
-            "brute_force_window_seconds": 300,
+            **settings.as_facts(),
             "credential_stuffing_mode": "cross_source",
-            "credential_stuffing_window_seconds": 600,
         },
     )
     alerts = [

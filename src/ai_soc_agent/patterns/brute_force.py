@@ -5,13 +5,21 @@ from __future__ import annotations
 import ipaddress
 from typing import Any
 
+from shared_llm_core.finding import FindingSeverity
 from shared_llm_core.rule_engine import RuleContext
 
+from ai_soc_agent.config import (
+    DEFAULT_BRUTE_FORCE_THRESHOLD,
+    DEFAULT_BRUTE_FORCE_WINDOW_SECONDS,
+)
 from ai_soc_agent.patterns.base import (
     SOCPattern,
+    alert_metadata,
     context_events,
+    context_suppression,
+    count_threshold,
     event_value,
-    first_group_window,
+    qualifying_windows,
 )
 
 
@@ -31,20 +39,34 @@ class BruteForceBurstRule(SOCPattern):
     technique = "T1110"
     confidence_default = 0.92
 
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        threshold = ctx.facts.get("brute_force_threshold", 5)
-        window_seconds = ctx.facts.get("brute_force_window_seconds", 60)
+    def matched_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
+        threshold = ctx.facts.get("brute_force_threshold", DEFAULT_BRUTE_FORCE_THRESHOLD)
+        window_seconds = ctx.facts.get(
+            "brute_force_window_seconds", DEFAULT_BRUTE_FORCE_WINDOW_SECONDS
+        )
         if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
             return ()
         if not isinstance(window_seconds, (int, float)) or window_seconds <= 0:
             return ()
-        return first_group_window(
+        return qualifying_windows(
             context_events(ctx),
             group_key=_ip_actor,
             predicate=lambda event: event_value(event, "result") == "failure"
             and "login" in str(event_value(event, "action", "")).casefold(),
-            threshold=threshold,
             seconds=float(window_seconds),
+            qualifies=count_threshold(threshold),
+            suppression=context_suppression(ctx),
+        )
+
+    def severity(self, ctx: RuleContext, events: tuple[Any, ...]) -> FindingSeverity:
+        """Escalate once a burst runs well past the configured threshold."""
+        threshold = ctx.facts.get("brute_force_threshold", DEFAULT_BRUTE_FORCE_THRESHOLD)
+        if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold <= 0:
+            threshold = DEFAULT_BRUTE_FORCE_THRESHOLD
+        return (
+            FindingSeverity.CRITICAL
+            if len(events) >= threshold * 4
+            else FindingSeverity.HIGH
         )
 
     def title(self, ctx: RuleContext, events: tuple[Any, ...]) -> str:
@@ -58,24 +80,6 @@ class BruteForceBurstRule(SOCPattern):
         )
 
     def finding_metadata(self, ctx: RuleContext, events: tuple[Any, ...]) -> dict[str, Any]:
-        return {
-            "alert_kind": "brute_force",
-            "actor": _ip_actor(events[-1]),
-            "targets": sorted(
-                {
-                    str(event_value(event, "target"))
-                    for event in events
-                    if event_value(event, "target") not in (None, "", "-", "unknown")
-                }
-            ),
-            "sources": sorted(
-                {
-                    str(event_value(event, "source"))
-                    for event in events
-                    if event_value(event, "source") not in (None, "")
-                }
-            ),
-            "event_count": len(events),
-            "first_seen": str(event_value(events[0], "ts")),
-            "last_seen": str(event_value(events[-1], "ts")),
-        }
+        return alert_metadata(
+            kind="brute_force", actor=_ip_actor(events[-1]), events=events
+        )
