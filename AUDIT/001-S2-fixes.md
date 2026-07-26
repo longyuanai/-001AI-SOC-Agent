@@ -2,7 +2,7 @@
 
 **审计日期**: 2026-07-25
 **审计人**: Claude
-**范围**: 全仓库缺陷诊断后的修复批次 (FIX-001 ~ FIX-015，见 `docs/TODO.md`)
+**范围**: 全仓库缺陷诊断后的修复批次 (FIX-001 ~ FIX-018，见 `docs/TODO.md`)
 
 ---
 
@@ -14,7 +14,7 @@
 |---|----|------|------|
 | 1 | 接口契约 | PASS | 未改 `000shared-llm-core`；只消费 `Finding` / `Rule` / `RuleContext` / `RuleEngine` / `RuleRegistry` / `LLMRouter`，无新增依赖面 |
 | 2 | 技术方案 | PASS | `docs/tech-spec.md` 未改；`docs/TODO.md` 从"全 pending"更新为真实状态 |
-| 3 | 测试 | PASS | 168 passed + 4 skipped(跨仓库用例)。修复前为 12 个 collection error(缺 sibling 仓库) |
+| 3 | 测试 | PASS | 178 passed + 4 skipped(跨仓库用例)。修复前为 12 个 collection error(缺 sibling 仓库) |
 | 4 | CLI smoke | PASS | `scan` / `--log-type` / bare-option 分发 / 多 actor 多 finding / nginx Web 爆破全部实测通过 |
 | 5 | 跨项目隔离 | PASS | 仅改动本仓库 |
 | 6 | 依赖管理 | PASS | 新增 `pyyaml`(prompt 加载)、dev 的 `httpx`(测试已在用但未声明)、`ruff`(已配置但未声明) |
@@ -62,6 +62,24 @@
 - **`Invalid user X from IP` 刻意不解析**: sshd 通常对同一次尝试同时打这一行和
   `Failed password for invalid user X`，两条都收会把失败次数翻倍、等效把阈值砍半。
   记录在 `docs/TODO.md` 的未闭环项，需要先做同次尝试去重。
+
+## 声明与死符号复查（第三轮）
+
+- **插件 entry point 无人校验**: `pyproject.toml` 在 `longyuanai.soc_patterns` 下
+  声明了全部 5 条规则，但本仓库没有任何代码读这个 group（`ENTRY_POINT_GROUP` 只是
+  一个导出的字符串常量）。消费方在 suite 侧，意味着改名或新增规则时声明会静默漂移，
+  真正加载它的人在运行时才发现。**没有擅自改变加载方式**（谁消费属于 suite 层决定），
+  而是加了一致性测试：每条声明必须能解析成 `SOCPattern` 子类，且集合与 `PATTERN_TYPES`
+  完全相等。已实测两种漂移（删掉一条、类名写错）都会让测试变红。
+- **`severity_hint` 会说谎**: 原本是类属性硬写 `"high"`，任何把 `severity_default`
+  调低的子类仍然报 "high"。改成从 `severity_default` 派生的属性，两者不可能再分叉，
+  同时保留外部introspection 的接口。
+- **`matched_events` 是我自己引入的死代码**: 上一轮为兼容单命中调用者加的，实际
+  没有任何调用点。既然本次审计的主线之一就是清死代码，一并删掉。
+- **nginx 登录路径写死**: `_LOGIN_SEGMENTS` 是模块级常量，自定义登录路由
+  (`/j_security_check` 等) 无法识别。收进 `config.login_path_segments()`，
+  由 `AI_SOC_LOGIN_PATH_SEGMENTS` 追加（只增不减，默认段永远生效），
+  与本次确立的"所有调参集中在 config.py"原则一致。
 
 ## S1 遗留 nit 关闭情况
 

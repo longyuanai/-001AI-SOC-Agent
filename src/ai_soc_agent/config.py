@@ -18,7 +18,9 @@ Any other tuning belongs in the payload, not in a new literal.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
 # Brute force (T1110): failed logins from one IP.
@@ -78,6 +80,40 @@ STREAMING_PROFILE: dict[str, Any] = {
     "brute_force_window_seconds": 300,
     "credential_stuffing_mode": CROSS_SOURCE_MODE,
 }
+
+
+#: Path segments that mark an HTTP request as an authentication attempt.
+DEFAULT_LOGIN_PATH_SEGMENTS = frozenset(
+    {
+        "auth",
+        "authenticate",
+        "login",
+        "log-in",
+        "logon",
+        "oauth",
+        "session",
+        "sessions",
+        "signin",
+        "sign-in",
+        "sso",
+        "token",
+    }
+)
+
+#: Comma-separated extra segments, for deployments whose login route is custom
+#: (``j_security_check``, ``identity``, ...). Additive: the defaults always apply.
+LOGIN_PATH_SEGMENTS_ENV = "AI_SOC_LOGIN_PATH_SEGMENTS"
+
+
+@lru_cache(maxsize=8)
+def _parse_login_segments(raw: str) -> frozenset[str]:
+    extra = {segment.strip().casefold() for segment in raw.split(",")}
+    return DEFAULT_LOGIN_PATH_SEGMENTS | {segment for segment in extra if segment}
+
+
+def login_path_segments() -> frozenset[str]:
+    """Return the auth path segments, including any environment additions."""
+    return _parse_login_segments(os.environ.get(LOGIN_PATH_SEGMENTS_ENV, ""))
 
 
 def detection_facts(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:

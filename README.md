@@ -99,6 +99,15 @@ method (password, publickey, ...), Okta `user.session.start`, Windows 4624/4625,
 and — for nginx — a credential-submitting verb (`POST`/`PUT`/`PATCH`) against an
 auth path. `GET /login` is a form load, not an authentication attempt.
 
+If your login route is not one of the built-in segments (`login`, `signin`,
+`session`, `oauth`, `token`, ...), add it:
+
+```bash
+export AI_SOC_LOGIN_PATH_SEGMENTS="j_security_check,identity"
+```
+
+The additions apply on top of the defaults, never instead of them.
+
 ## API server
 
 Run the webhook API locally. It binds `127.0.0.1` by default; override with

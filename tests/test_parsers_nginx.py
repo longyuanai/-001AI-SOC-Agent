@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ai_soc_agent.config import LOGIN_PATH_SEGMENTS_ENV
 from ai_soc_agent.parsers import (
     is_login_endpoint,
     parse_file,
@@ -164,3 +165,36 @@ def test_login_bruteforce_sample_parses_to_five_failed_logins():
 
     assert len(failed_logins) == 5
     assert {event.actor for event in failed_logins} == {"203.0.113.77"}
+
+
+def test_custom_login_paths_come_from_the_environment(monkeypatch):
+    """A deployment whose login route is /j_security_check must be able to say so."""
+    request = "/j_security_check"
+    assert is_login_endpoint(request) is False
+
+    monkeypatch.setenv(LOGIN_PATH_SEGMENTS_ENV, "j_security_check, identity")
+
+    assert is_login_endpoint(request) is True
+    assert is_login_endpoint("/v1/identity") is True
+    # The built-in segments still apply alongside the additions.
+    assert is_login_endpoint("/login") is True
+
+
+def test_custom_login_paths_change_the_parsed_action(monkeypatch):
+    monkeypatch.setenv(LOGIN_PATH_SEGMENTS_ENV, "j_security_check")
+    line = (
+        '203.0.113.77 - - [25/Jul/2026:14:02:04 +0800] '
+        '"POST /j_security_check HTTP/1.1" 401 97 "-" "curl/8"'
+    )
+
+    event = parse_nginx_line(line)
+
+    assert event is not None
+    assert event.action == "web_login"
+
+
+def test_blank_environment_entries_are_ignored(monkeypatch):
+    monkeypatch.setenv(LOGIN_PATH_SEGMENTS_ENV, " , ,, ")
+
+    assert is_login_endpoint("/login") is True
+    assert is_login_endpoint("/admin") is False

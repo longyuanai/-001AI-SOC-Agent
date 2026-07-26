@@ -171,16 +171,19 @@ class SOCPattern(Rule):
     alert_kind: str
     severity_default = FindingSeverity.HIGH
     confidence_default = 0.85
-    severity_hint = "high"
+
+    @property
+    def severity_hint(self) -> str:
+        """String form of ``severity_default``, for callers that introspect rules.
+
+        Derived rather than stored: as a plain class attribute it kept saying
+        "high" for any subclass that lowered ``severity_default``.
+        """
+        return self.severity_default.value
 
     @abstractmethod
     def matched_event_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
         """Return one evidence window per independent match, else empty."""
-
-    def matched_events(self, ctx: RuleContext) -> tuple[Any, ...]:
-        """Return the first evidence window; convenience for single-match callers."""
-        groups = self.matched_event_groups(ctx)
-        return groups[0] if groups else ()
 
     def match(self, ctx: RuleContext) -> bool:
         """Return whether this pattern recognizes the supplied context."""

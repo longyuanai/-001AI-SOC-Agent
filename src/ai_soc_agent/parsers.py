@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from xml.etree import ElementTree
 
+from ai_soc_agent.config import login_path_segments
 from ai_soc_agent.normalizer import NormalizedEvent
 
 # OpenSSH auth.log pattern (Debian / Ubuntu).
@@ -50,26 +51,6 @@ _NGINX_COMBINED_RE = re.compile(
     r'"(?P<method>\S+)\s+(?P<request>\S+)(?:\s+(?P<protocol>[^"]+))?"\s+'
     r'(?P<status>\d{3})\s+(?P<bytes>\d+|-)\s+'
     r'"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"$'
-)
-
-# Path segments that mean "this request is an authentication attempt". Needed
-# because every nginx event used to be action="http_request", which contains no
-# "login" token, so T1110 could never fire on web brute force.
-_LOGIN_SEGMENTS = frozenset(
-    {
-        "auth",
-        "authenticate",
-        "login",
-        "log-in",
-        "logon",
-        "oauth",
-        "session",
-        "sessions",
-        "signin",
-        "sign-in",
-        "sso",
-        "token",
-    }
 )
 
 #: Only these verbs submit credentials; GET /login is just loading the form.
@@ -238,7 +219,12 @@ def parse_evtx_line(line: str) -> NormalizedEvent | None:
 
 
 def is_login_endpoint(request: str) -> bool:
-    """Return whether a request target looks like an authentication endpoint."""
+    """Return whether a request target looks like an authentication endpoint.
+
+    Needed because every nginx event used to be ``action="http_request"``, which
+    carries no "login" token, so T1110 could never fire on web brute force.
+    Custom routes are added through ``AI_SOC_LOGIN_PATH_SEGMENTS``.
+    """
     path = request.split("?", 1)[0].split("#", 1)[0]
     segments = [segment.casefold() for segment in path.split("/") if segment]
     if not segments:
@@ -249,7 +235,8 @@ def is_login_endpoint(request: str) -> bool:
     if stem and suffix in _STATIC_SUFFIXES:
         return False
 
-    if any(segment in _LOGIN_SEGMENTS for segment in segments):
+    login_segments = login_path_segments()
+    if any(segment in login_segments for segment in segments):
         return True
     # wp-login.php, user_login.jsp, doSignin.do, ...
     return any(token in (stem or last) for token in ("login", "signin", "logon"))
