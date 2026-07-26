@@ -60,6 +60,11 @@ poetry run pytest -v
 
 All tests use a stubbed router; no live LLM is required.
 
+The suite also runs without the sibling `000shared-llm-core` checkout — when
+that package is missing, `tests/conftest.py` falls back to the contract stub in
+`tests/_contract_stub/` and warns. Cross-repo tests skip themselves. See
+`tests/_contract_stub/README.md` for what that does and does not cover.
+
 ## API server
 
 Run the webhook API locally:
@@ -70,7 +75,40 @@ curl -H "Content-Type: application/json" \
   --data-binary @samples/multi_source_demo.log \
   http://127.0.0.1:8080/ingest
 curl http://127.0.0.1:8080/alerts
+curl http://127.0.0.1:8080/health
 ```
+
+The server binds `127.0.0.1` by default. Before exposing it, set
+`SOC_API_TOKEN` — `/ingest` accepts unauthenticated writes when it is unset,
+and `main()` warns on startup if it is.
+
+```bash
+export SOC_API_TOKEN=...           # require: Authorization: Bearer <token>
+export SOC_HOST=0.0.0.0            # bind elsewhere (default 127.0.0.1)
+curl -H "Authorization: Bearer $SOC_API_TOKEN" ... http://127.0.0.1:8080/ingest
+```
+
+`GET /alerts` supports `type`, `severity`, `limit`, and `offset`, and returns
+alerts newest-first with a `total` alongside the page `count`.
+
+## Detection tuning
+
+Thresholds live in `ai_soc_agent.config` and are overridable per deployment:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SOC_BRUTE_FORCE_THRESHOLD` | 5 batch / 10 stream | failures before an alert |
+| `SOC_BRUTE_FORCE_WINDOW_SECONDS` | 60 batch / 300 stream | burst window |
+| `SOC_CREDENTIAL_STUFFING_WINDOW_SECONDS` | 600 | cross-source window |
+| `SOC_SUPPRESS_ACTORS` | _empty_ | comma-separated IPs/users to allowlist |
+| `SOC_SUPPRESS_NETWORKS` | _empty_ | comma-separated CIDRs to allowlist |
+| `SOC_LOG_LEVEL` | `INFO` | server log level |
+
+Batch mode (CLI and gateway adapter) is tuned for "scan this log file"; stream
+mode (`/ingest`) matches the correlation rule in `docs/tech-spec.md` §1 — 10
+failures from one IP in 5 minutes. Use the suppression lists for vulnerability
+scanners, monitoring probes, and jump hosts, which otherwise generate exactly
+the traffic these rules look for.
 
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
@@ -112,14 +150,28 @@ curl -H "Content-Type: application/json" \
 001AI-SOC-Agent/
 ├── src/ai_soc_agent/
 │   ├── __init__.py        # public API
-│   ├── normalizer.py      # NormalizedEvent dataclass
-│   ├── parsers.py         # OpenSSH auth.log parser
+│   ├── config.py          # detection thresholds + suppression allowlists
+│   ├── normalizer.py      # NormalizedEvent dataclass (UTC-normalized)
+│   ├── parsers.py         # sshd / evtx / nginx / okta parsers
+│   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
+│   │   ├── base.py        # SOCPattern + shared sliding-window helpers
+│   │   ├── brute_force.py         # T1110
+│   │   ├── credential_stuffing.py # T1110.004
+│   │   ├── geo_anomaly.py         # T1078
+│   │   ├── lateral_movement.py    # T1021
+│   │   └── priv_esc.py            # T1548
+│   ├── correlator.py      # Alert compatibility layer over the RuleEngine
+│   ├── findings.py        # v0.5 Finding construction
+│   ├── adapter.py         # in-process IntegrationGateway adapter
 │   ├── analyzer.py        # LLM triage (single-shot JSON)
 │   ├── reporter.py        # Markdown report renderer
-│   └── cli.py             # Click CLI: ai-soc analyze
+│   ├── server.py          # FastAPI /ingest, /alerts, /health
+│   └── cli.py             # Click CLI: ai-soc analyze | scan
 ├── prompts/incident_triage/v1.yml
-├── samples/ssh_bruteforce.log
+├── samples/               # ssh, nginx, okta, windows, mitre/
 ├── tests/
+│   ├── _contract_stub/    # shared_llm_core stand-in for CI
+│   └── integration/       # cross-repo, skipped without the siblings
 └── pyproject.toml
 ```
 

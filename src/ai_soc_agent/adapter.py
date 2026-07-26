@@ -7,6 +7,9 @@ from typing import Any, AsyncIterator
 from shared_llm_core.finding import Finding, FindingSource
 from shared_llm_core.gateway import ProductAdapter
 
+#: v0.5 IntegrationGateway contract implemented by this adapter.
+GATEWAY_CONTRACT_VERSION = "0.5.0"
+
 
 class SOCProductAdapter(ProductAdapter):
     """Expose the existing SOC detection pipeline as an in-process adapter."""
@@ -29,5 +32,7 @@ class SOCProductAdapter(ProductAdapter):
         return {
             "status": "ok",
             "product": "001-soc",
-            "version": "0.5.0",
+            # The gateway contract version this adapter implements, which is
+            # deliberately not the package version (see __init__.__version__).
+            "version": GATEWAY_CONTRACT_VERSION,
         }

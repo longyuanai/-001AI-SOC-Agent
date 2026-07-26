@@ -1,6 +1,6 @@
 # 001 AI-SOC-Agent · v0.1 TODO
 
-> **项目状态**: PoC ✅ (15/15 tests passing)
+> **项目状态**: v0.6 · 154 passed + 4 skipped(跨仓库)
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
 
@@ -10,12 +10,21 @@
 
 | ID | 任务 | 状态 | 启动日 | 完成日 | 备注 |
 |----|------|------|-------|-------|------|
-| PARSER-001 | 加 Windows Event Log 解析器 | pending | | | |
-| PARSER-002 | 加 Nginx access log 解析器 | pending | | | |
-| PARSER-003 | 加 Okta 登录日志解析器 | pending | | | |
-| DETECT-001 | 关联规则 (同 IP 5 分钟 10 次失败 → 告警) | pending | | | |
-| API-001 | FastAPI server (接 ELK / Splunk) | pending | | | |
-| DOCKER-001 | Dockerfile | pending | | | |
+| PARSER-001 | 加 Windows Event Log 解析器 | done | | 2026-07-24 | `parse_evtx_line`,iterparse 流式 |
+| PARSER-002 | 加 Nginx access log 解析器 | done | | 2026-07-24 | `parse_nginx_line` |
+| PARSER-003 | 加 Okta 登录日志解析器 | done | | 2026-07-24 | `parse_okta_record`,JSONL + 数组 |
+| DETECT-001 | 关联规则 (同 IP 5 分钟 10 次失败 → 告警) | done | | 2026-07-25 | stream 模式默认值,见 `config.py` |
+| API-001 | FastAPI server (接 ELK / Splunk) | done | | 2026-07-25 | `/ingest` `/alerts` `/health` |
+| DOCKER-001 | Dockerfile | done | | 2026-07-25 | slim 多阶段 + 非 root |
+| CI-001 | GitHub Actions (ruff + pytest) | done | | 2026-07-26 | 含 `tests/_contract_stub` 兜底 |
+
+## P1 · 已知缺口
+
+| ID | 任务 | 状态 | 备注 |
+|----|------|------|------|
+| ENRICH-001 | GeoIP 富化 (`extra.continent`) | pending | 没有它 `GeoAnomalousLoginRule` 在生产中永不触发 |
+| ENRICH-002 | 凭据指纹 (`extra.password_hash`) | pending | 没有它凭据填充规则只有 cross_source 分支是活的 |
+| PERSIST-001 | 告警落盘 | pending | 目前纯内存,重启即丢 |
 
 ---
 
