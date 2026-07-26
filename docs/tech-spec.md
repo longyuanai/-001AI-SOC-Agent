@@ -282,26 +282,30 @@ class SOCPattern(Rule):
 - ❌ 不让 001 仓直接 import 002/003/etc(横向耦合,违反 §10 ProductAdapter 单向隔离)
 - ❌ 不把规则写死在 `correlator.py` 的 if-else 里,必须走 v0.5 §8 RuleEngine
 - ❌ 不打真外部 API(NVD / Okta),CI 不允许网络
-- ❌ 不动 `tests/test_cli_envelope.py` —— §15 契约测试是冻结基线
+- ❌ 不动 `tests/test_cli_envelope.py` 的**断言** —— §15 契约测试是冻结基线
+  （2026-07-26 例外：给依赖 `000shared-integration` 的那个用例加了
+  `skipif`，缺兄弟仓库时跳过而非让整个 collection 报错。断言本身一字未改。）
 
 ### 14.5 验收清单
 
 Codex 完工后跑:
 
 ```powershell
-# 必须用绝对 Python + basetemp 隔离
-& 'C:\Users\15072\AppData\Local\Programs\Python\Python314\python.exe' `
-  -m pytest tests/ `
-  --basetemp=C:/pytest-tmp/001-phase2 `
-  -o addopts= `
-  -q --tb=short
+poetry run pytest -q --tb=short
 
 # CLI envelope 必须保持
-& 'C:\Users\15072\AppData\Local\Programs\Python\Python314\python.exe' `
-  -m ai_soc_agent scan --input '{"source":"sshd","events":[...]}' --json
+poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' --json
 ```
 
-预期:≥ 95 passed(原 76 + Phase-2 新增 19);CLI envelope 仍是 `{"findings": [...], "summary": {...}}`。
+预期:154 passed + 4 skipped(跨仓库测试,缺 `000shared-*` 时自动跳过)。
+CLI envelope 是 `{"findings": [...]}` —— **只有 findings 一个键**,由
+`tests/test_cli_envelope.py::test_scan_sshd_returns_envelope` 冻结。
+
+> 本节旧版本要求 `--basetemp=C:/pytest-tmp/...` 加 `-o addopts=`。前者是
+> AUDIT/001-S1.md Nit 1 那 7 个 Windows 文件锁 ERROR 的根因,后者只是用来覆盖
+> 前者;`--basetemp` 已从 pyproject.toml 移除,两个开关都不要再加。旧版本还写
+> envelope 含 `summary` 键 —— 那是笔误,契约测试断言 `list(envelope) ==
+> ["findings"]`,加 `summary` 会直接挂。
 
 ---
 
