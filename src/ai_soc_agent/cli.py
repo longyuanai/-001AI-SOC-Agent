@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ import click
 from rich.console import Console
 
 from ai_soc_agent import __version__
-from ai_soc_agent.analyzer import analyze_events
+from ai_soc_agent.analyzer import AssessmentError, analyze_events
 from ai_soc_agent.correlator import detect_patterns
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.parsers import (
@@ -24,6 +25,7 @@ from ai_soc_agent.parsers import (
 )
 from ai_soc_agent.reporter import render_markdown
 
+logger = logging.getLogger(__name__)
 console = Console()
 _LOG_TYPES = ("sshd", "evtx", "nginx", "okta")
 
@@ -101,6 +103,14 @@ def _payload_events(
         if event is not None:
             parsed.append(event)
 
+    if (dropped := len(raw_events) - len(parsed)) > 0:
+        logger.warning(
+            "%d of %d submitted %s events did not parse and were skipped",
+            dropped,
+            len(raw_events),
+            source,
+        )
+
     return parsed, _brute_force_threshold(payload)
 
 
@@ -144,7 +154,23 @@ def scan_payload(
     return {"findings": serialized}
 
 
-@click.group()
+class _DefaultCommandGroup(click.Group):
+    """Route bare options to ``scan`` so ``... --json`` keeps working.
+
+    Replaces a hand-rolled argv sniffer that inserted "scan" whenever the first
+    argument started with "-" and any argument matched a hardcoded option list;
+    it broke as soon as scan grew an option.
+    """
+
+    default_command = "scan"
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args and args[0].startswith("-") and args[0] not in ("--help", "--version"):
+            args = [self.default_command, *args]
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=_DefaultCommandGroup)
 @click.version_option(__version__)
 def cli() -> None:
     """AI-SOC-Agent: log analysis copilot."""
@@ -225,8 +251,11 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
         return
 
     console.print("[bold]Analyzing[/bold] via shared-llm-core ...")
-    with LLMRouter.from_env() as router:
-        assessment = analyze_events(events, router)
+    try:
+        with LLMRouter.from_env() as router:
+            assessment = analyze_events(events, router)
+    except AssessmentError as exc:
+        raise click.ClickException(f"LLM triage failed: {exc}") from exc
 
     report = render_markdown(events, assessment, source_path=input_path)
     if output_path == "-":
@@ -238,15 +267,7 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
 
 
 def main() -> None:
-    args = sys.argv[1:]
-    if args and args[0].startswith("-") and any(
-        arg in {"--json", "--input", "--log-file"}
-        or arg.startswith("--input=")
-        or arg.startswith("--log-file=")
-        for arg in args
-    ):
-        args.insert(0, "scan")
-    cli.main(args=args, prog_name="python -m ai_soc_agent.cli")
+    cli.main(args=sys.argv[1:], prog_name="python -m ai_soc_agent.cli")
 
 
 if __name__ == "__main__":
