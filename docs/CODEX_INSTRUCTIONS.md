@@ -14,13 +14,18 @@
 - 项目: <006AI-Firmware-Security-Agent 等>
 - 工作目录: <E:\001项目\000开发\003AI+网络安全\XXX>
 
-## ⚠️ 必须先 Read 的 4 个文件（跨项目依赖）
-1. <E:\...\XXX\docs\tech-spec.md>             — 本项目业务方案
+## ⚠️ 必须先 Read 的 5 个文件（跨项目依赖）
+1. <E:\...\XXX\docs\tech-spec.md>             — 本项目业务方案。**§15 是冻结的验收基线**
 2. <E:\...\XXX\docs\TODO.md>                   — 本项目 issue 清单 + 上下文
 3. <E:\...\000shared-llm-core\docs\v0.1-contract.md>  — 共享接口契约 (已冻结!)
 4. <E:\...\000shared-llm-core\src\shared_llm_core\__init__.py>  — 共享 API 真实导出
+5. <E:\...\000shared-llm-core\src\shared_llm_core\finding.py>   — Finding / RuleEngine 真实签名
 
 (共享内核不在你工作目录下,但你必须先 Read 才能正确 import)
+
+**文档与代码冲突时以测试为准**，然后回头改文档并在回报里写进 Deviations。
+tech-spec 曾经把 CLI envelope 写成 `{"findings": [...], "summary": {...}}`，
+实际只有 `findings` 一个键 —— 照文档做会直接把契约测试跑红。
 
 ## 必须做的事
 1. <具体动作 1，含文件路径>
@@ -33,10 +38,16 @@
 - 用现有 prompt 模板结构（prompts/<name>/<version>.yml）
 - 测试用 stub router / httpx.MockTransport（不能真调 LLM）
 - Windows 兼容：用 pathlib.Path，不写死斜杠
-- pytest 加 pytest.ini 或 pyproject.toml 里 --basetemp=.pytest-tmp
+- **不要加 `--basetemp` 覆盖**。曾经配过 `--basetemp=.pytest-tmp`，结果 IDE 和终端
+  并发跑测试互相抢同一个目录，Windows 上直接 7 个 ERROR。pytest 自带的
+  tmp_path_factory 已经会隔离 + 清理。
+- 新增阈值/调参一律进本项目 `config.py`，不要在规则或 CLI 里写字面量
+- 改 prompt 只改 `prompts/<name>/<version>.yml`，不要在 Python 里再写一份
 
 ## 不要做的事
 - 不要改 tech-spec.md（除非该 issue 本身是改 spec）
+- 不要动"冻结契约测试"（清单见 001 项目 tech-spec.md §15）。
+  这些测试红了 = 破坏了跨仓契约，不是"把断言改一改"就能过的
 - 不要动其他项目的代码
 - 不要改 000shared-llm-core/ 任何文件 (它是冻结的内核)
 - 不要装新依赖（除非 issue 显式批准）
@@ -89,7 +100,6 @@
 - 测试用 httpx.MockTransport，不真打 NVD
 - 没有 NVD API key 时 fallback 到 mock_lookup，不能崩
 - Windows 兼容
-- 加 --basetemp=.pytest-tmp
 
 ## 不要做的事
 - 不要删 mock_lookup（保留作 fallback + 测试用）
@@ -185,7 +195,7 @@
 3. 一次只做一个 issue,完成后等下一个
 4. 不要跨项目改动,不要改接口契约
 5. 测试用 stub router / httpx.MockTransport,不能真调外部 API
-6. Windows 优先兼容(pathlib.Path, --basetemp=.pytest-tmp)
+6. Windows 优先兼容(pathlib.Path);不要加 --basetemp 覆盖
 7. 完成后用标准回报格式回复(见 CODEX_INSTRUCTIONS.md 末尾)
 
 边界:
