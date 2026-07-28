@@ -115,7 +115,13 @@ tech-spec 曾经把 CLI envelope 写成 `{"findings": [...], "summary": {...}}`�
 
 ---
 
-## 实例 2：加 Windows Event Log 解析器（P0-3 · PARSER-001）
+## 实例 2：加 Windows Event Log 解析器（P0-3 · PARSER-001）—— **已交付，仅作范例**
+
+> ⚠️ 001 项目的 PARSER-001 早已完成（`docs/TODO.md` 标 done）。下面这张卡**不要
+> 再派发**，它只是展示"怎么写一张任务卡"的范本。实际交付的 API 形状与本卡原文
+> 不同——之前版本写的 `parse_evtx_file(path)` 和 `samples/win_logon_4625.xml`
+> 都是当时的设想，不是最终交付物，已按实际改正如下，避免复制这张卡时被文件名
+> 和函数名带偏：
 
 ```
 [PARSER-001] 001 AI-SOC-Agent · 加 Windows Event Log 解析器
@@ -129,10 +135,11 @@ tech-spec 曾经把 CLI envelope 写成 `{"findings": [...], "summary": {...}}`�
 1. 在 src/ai_soc_agent/parsers.py 加 parse_evtx_line(line: str) -> NormalizedEvent | None
    - 支持 XML 格式（Windows Event Log 导出）
    - 至少识别 Event ID 4625（登录失败）、4624（登录成功）、4648（显式凭据）
-2. 在 src/ai_soc_agent/parsers.py 加 parse_evtx_file(path: str) -> list[NormalizedEvent]
+2. 整文件解析统一走已有的 parse_file(path, log_type="evtx")，不要新开一个
+   独立的公开函数名——单文件多 `<Event>` 与单条 `<Event>` 都要能解析
 3. CLI 加 --log-type {sshd|evtx} 选项
-4. samples/ 加 samples/win_logon_4625.xml（至少 5 行假数据）
-5. 加 tests/test_evtx.py：覆盖 3 个 Event ID
+4. samples/ 加 samples/windows_events.xml（至少 5 条事件，覆盖 3 个 Event ID）
+5. 加 tests/test_parsers_evtx.py：覆盖 3 个 Event ID + 命名空间 XML + 整文件解析
 
 ## 必须满足的约束
 - 不引入新依赖（用标准库 xml.etree）
@@ -148,7 +155,7 @@ tech-spec 曾经把 CLI envelope 写成 `{"findings": [...], "summary": {...}}`�
 ## 验收
 - [ ] pytest 全绿
 - [ ] 新增 ≥ 5 个测试
-- [ ] CLI smoke: ai-soc analyze -i samples/win_logon_4625.xml -o report.md
+- [ ] CLI smoke: python -m ai_soc_agent scan --log-file samples/windows_events.xml --log-type evtx
 - [ ] 报告里能看到 Windows Event ID 信息
 ```
 
