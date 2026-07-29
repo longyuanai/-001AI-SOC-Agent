@@ -79,6 +79,8 @@
   不下载 GeoIP 数据库、不增加生产依赖。
 - `ENRICH-002` scoped HMAC credential fingerprint 已于 **2026-07-29 完成**；
   明文/旧式 hash 不进入检测副本，Finding evidence 强制脱敏。
-- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `STATE-001`；
-  先做有界内存实现，不引入数据库。
+- `STATE-001` 有界跨批次 `WindowStateStore` 已于 **2026-07-29 完成**；
+  Server 持有状态，CLI/Adapter 继续纯批处理。
+- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `DEDUP-001`；
+  Finding UUID 不改，通过 metadata fingerprint 和静默策略去重。
 - `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。

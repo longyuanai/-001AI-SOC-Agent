@@ -164,6 +164,20 @@ detection copy without retaining their value. Finding evidence is rendered as
 `[credential redacted]`. AI-SOC-Agent never receives a plaintext password and
 does not derive password hashes itself.
 
+## Bounded stream state
+
+Continuous `/ingest` correlation uses `WindowStateStore` to retain events
+across webhook requests. The store:
+
+- orders by event time and accepts bounded out-of-order input
+- ignores exact duplicate events
+- evicts history outside the 24-hour rule horizon
+- enforces a global event-capacity limit
+- supports isolated namespaces and an injected clock for deterministic tests
+
+Each FastAPI app owns its store. CLI scans and `SOCProductAdapter.scan()` remain
+pure batch operations with no hidden process-global history.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -208,6 +222,7 @@ curl -H "Content-Type: application/json" \
 │   ├── normalizer.py      # NormalizedEvent dataclass (UTC-normalized)
 │   ├── field_mapping.py   # source fields → canonical detection aliases
 │   ├── enrichment.py      # offline Geo + credential input validation
+│   ├── state.py           # bounded cross-batch event-time state
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers

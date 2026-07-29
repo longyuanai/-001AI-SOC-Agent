@@ -17,6 +17,7 @@ from ai_soc_agent import __version__
 from ai_soc_agent.config import DetectionConfig
 from ai_soc_agent.correlator import Alert, correlate
 from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.state import WindowStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +74,15 @@ IngestPayload = EventBatch | SplunkEnvelope | list[EventIn] | EventIn
 
 @dataclass
 class _Store:
-    max_events: int
+    event_state: WindowStateStore
     max_alerts: int
     max_correlation_events: int
-    events: list[NormalizedEvent] = field(default_factory=list)
     alerts: dict[tuple[str, str], Alert] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
+
+    @property
+    def max_events(self) -> int:
+        return self.event_state.max_events
 
 
 def _payload_events(payload: IngestPayload) -> list[EventIn]:
@@ -103,11 +107,7 @@ def _identity(alert: Alert) -> tuple[str, str]:
 
 def _correlation_slice(store: _Store) -> list[NormalizedEvent]:
     """Return the recent events worth re-correlating."""
-    if not store.events:
-        return []
-    recent = store.events[-store.max_correlation_events :]
-    horizon = max(event.ts for event in recent) - CORRELATION_HORIZON
-    return [event for event in recent if event.ts >= horizon]
+    return store.event_state.snapshot(limit=store.max_correlation_events)
 
 
 def create_app(
@@ -132,7 +132,10 @@ def create_app(
 
     app = FastAPI(title="AI-SOC-Agent", version=__version__)
     store = _Store(
-        max_events=max_events,
+        event_state=WindowStateStore(
+            max_events=max_events,
+            horizon=CORRELATION_HORIZON,
+        ),
         max_alerts=max_alerts,
         max_correlation_events=max_correlation_events,
     )
@@ -163,7 +166,7 @@ def create_app(
     def health() -> dict[str, Any]:
         """Liveness probe that does not serialize the alert store."""
         with store.lock:
-            events = len(store.events)
+            events = len(store.event_state)
             alerts = len(store.alerts)
         return {
             "status": "ok",
@@ -186,9 +189,7 @@ def create_app(
         # Snapshot under the lock, correlate outside it: correlation is the
         # expensive part and holding the lock across it serialized every request.
         with store.lock:
-            store.events.extend(normalized)
-            if len(store.events) > store.max_events:
-                del store.events[: len(store.events) - store.max_events]
+            state_result = store.event_state.append(normalized)
             candidates = _correlation_slice(store)
 
         correlated = correlate(candidates, config=settings)
@@ -208,8 +209,12 @@ def create_app(
             total_alerts = len(store.alerts)
 
         logger.info(
-            "ingested events=%d correlated=%d new_alerts=%d total_alerts=%d",
+            "ingested events=%d stored=%d duplicates=%d expired=%d "
+            "correlated=%d new_alerts=%d total_alerts=%d",
             len(normalized),
+            state_result.accepted,
+            state_result.duplicates,
+            state_result.expired,
             len(candidates),
             len(created),
             total_alerts,

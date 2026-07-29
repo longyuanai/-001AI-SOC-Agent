@@ -1,7 +1,7 @@
 # 001 AI-SOC-Agent · 开源能力融合实施方案
 
-> 状态：已确认，Phase F1 + FIELD-MAP-001 + ENRICH-001/002 已完成
-> 基线：v0.6，210 passed（兄弟仓库齐全）
+> 状态：已确认，Phase F1/F2 + STATE-001 已完成
+> 基线：v0.6，223 passed（兄弟仓库齐全）
 > 更新日期：2026-07-29
 
 ## 1. 目标与边界
@@ -352,3 +352,5 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
   无网络/无数据库规范化和 12 个新增测试落地。
 - 2026-07-29：完成 `ENRICH-002`；只接受 scoped HMAC 指纹，拒绝明文
   与旧式 hash，Finding evidence 脱敏，12 个新增测试落地。
+- 2026-07-29：完成 `STATE-001`；Server 使用有界、去重、事件时间驱动的
+  内存状态，CLI/Adapter 保持无状态，13 个新增测试落地。
