@@ -128,6 +128,20 @@ point. Validation detects metadata drift and confirms that every entry point
 resolves to the registered executable rule. It never loads external rules or
 calls a network service.
 
+## Canonical detection fields
+
+Before `RuleEngine` evaluation, `FieldMappingPipeline` adds deterministic
+aliases to `NormalizedEvent.extra`:
+
+- `src_ip`, `user`, `host`, `destination_host`, and `service`
+- `process` for Windows process names
+- `http_method` / `http_status` for Nginx
+- `application` for Okta SSO targets
+
+Explicit upstream canonical values win, unknown vendor fields remain intact,
+and the operation is idempotent. The mapper does not perform network
+enrichment and never invents `continent` or credential fingerprint fields.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -170,6 +184,7 @@ curl -H "Content-Type: application/json" \
 │   ├── __init__.py        # public API
 │   ├── config.py          # detection thresholds + suppression allowlists
 │   ├── normalizer.py      # NormalizedEvent dataclass (UTC-normalized)
+│   ├── field_mapping.py   # source fields → canonical detection aliases
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers

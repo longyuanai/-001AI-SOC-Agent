@@ -1,7 +1,7 @@
 # 001 AI-SOC-Agent · 开源能力融合实施方案
 
-> 状态：已确认，Phase F1 已完成
-> 基线：v0.6，175 passed（兄弟仓库齐全）
+> 状态：已确认，Phase F1 + FIELD-MAP-001 已完成
+> 基线：v0.6，186 passed（兄弟仓库齐全）
 > 更新日期：2026-07-29
 
 ## 1. 目标与边界
@@ -346,3 +346,5 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
 
 - 2026-07-29：完成 `RULE-MANIFEST-001`；五个 manifest、entry point
   审计、CLI list/validate 和 17 个新增测试落地。
+- 2026-07-29：完成 `FIELD-MAP-001`；四源 canonical aliases、检测入口
+  集成和 11 个新增测试落地。

@@ -13,6 +13,7 @@ from shared_llm_core.finding import Finding
 from shared_llm_core.rule_engine import RuleContext, RuleEngine
 
 from ai_soc_agent.config import DetectionConfig
+from ai_soc_agent.field_mapping import map_events
 from ai_soc_agent.normalizer import NormalizedEvent, ensure_utc
 from ai_soc_agent.patterns import build_pattern_engine
 from ai_soc_agent.patterns.base import event_timestamp, source_family
@@ -248,13 +249,18 @@ def detect_patterns(
     engine: RuleEngine | None = None,
 ) -> list[Finding]:
     """Evaluate all MITRE patterns through the frozen v0.5 RuleEngine."""
-    merged_facts: dict[str, Any] = {"events": tuple(events)}
+    mapped_events = map_events(events)
+    merged_facts: dict[str, Any] = {"events": tuple(mapped_events)}
     if facts:
         merged_facts.update(facts)
     # Events may arrive as dicts from the gateway and with mixed tz-awareness,
     # so normalize before comparing instead of calling min()/max() directly.
     timestamps = sorted(
-        (ensure_utc(ts) for event in events if (ts := event_timestamp(event)) is not None),
+        (
+            ensure_utc(ts)
+            for event in mapped_events
+            if (ts := event_timestamp(event)) is not None
+        ),
     )
     context = RuleContext(
         subject="soc-event-stream",
