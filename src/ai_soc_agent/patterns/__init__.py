@@ -7,6 +7,11 @@ from ai_soc_agent.patterns.brute_force import BruteForceBurstRule
 from ai_soc_agent.patterns.credential_stuffing import CredentialStuffingRule
 from ai_soc_agent.patterns.geo_anomaly import GeoAnomalousLoginRule
 from ai_soc_agent.patterns.lateral_movement import LateralMovementRule
+from ai_soc_agent.patterns.manifest import (
+    RULE_MANIFESTS,
+    RuleManifest,
+    validate_manifests,
+)
 from ai_soc_agent.patterns.priv_esc import PrivilegeEscalationRule
 
 ENTRY_POINT_GROUP = "longyuanai.soc_patterns"
@@ -32,6 +37,11 @@ def build_pattern_engine() -> RuleEngine:
     return RuleEngine(register_patterns())
 
 
+def validate_builtin_manifests() -> tuple[str, ...]:
+    """Audit built-in manifests against the executable Rule classes."""
+    return validate_manifests(RULE_MANIFESTS, PATTERN_TYPES)
+
+
 __all__ = [
     "BruteForceBurstRule",
     "CredentialStuffingRule",
@@ -40,7 +50,10 @@ __all__ = [
     "LateralMovementRule",
     "PATTERN_TYPES",
     "PrivilegeEscalationRule",
+    "RULE_MANIFESTS",
+    "RuleManifest",
     "SOCPattern",
     "build_pattern_engine",
     "register_patterns",
+    "validate_builtin_manifests",
 ]

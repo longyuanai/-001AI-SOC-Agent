@@ -23,6 +23,7 @@ from ai_soc_agent.parsers import (
     parse_nginx_line,
     parse_okta_record,
 )
+from ai_soc_agent.patterns import RULE_MANIFESTS, validate_builtin_manifests
 from ai_soc_agent.reporter import render_markdown
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,41 @@ class _DefaultCommandGroup(click.Group):
 @click.version_option(__version__)
 def cli() -> None:
     """AI-SOC-Agent: log analysis copilot."""
+
+
+@cli.group("rules")
+def rules_group() -> None:
+    """Inspect and validate built-in detection rule manifests."""
+
+
+@rules_group.command("list")
+@click.option("--json", "json_output", is_flag=True, help="Emit a JSON rule envelope.")
+def list_rules(json_output: bool) -> None:
+    """List the built-in Sigma-compatible rule manifests."""
+    manifests = [manifest.to_dict() for manifest in RULE_MANIFESTS]
+    if json_output:
+        click.echo(
+            json.dumps(
+                {"rules": manifests},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+
+    for manifest in manifests:
+        click.echo(
+            f"{manifest['id']}\t{manifest['severity']}\t{manifest['title']}"
+        )
+
+
+@rules_group.command("validate")
+def validate_rules() -> None:
+    """Validate manifests against executable rules and entry points."""
+    errors = validate_builtin_manifests()
+    if errors:
+        raise click.ClickException("\n".join(errors))
+    click.echo(f"{len(RULE_MANIFESTS)} rule manifest(s) valid")
 
 
 @cli.command()

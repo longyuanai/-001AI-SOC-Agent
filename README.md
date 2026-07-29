@@ -110,6 +110,24 @@ failures from one IP in 5 minutes. Use the suppression lists for vulnerability
 scanners, monitoring probes, and jump hosts, which otherwise generate exactly
 the traffic these rules look for.
 
+## Detection rule manifests
+
+The five built-in MITRE ATT&CK rules expose read-only, Sigma-compatible
+metadata without changing the frozen `Rule.evaluate()` execution contract.
+List or audit them locally:
+
+```bash
+python -m ai_soc_agent rules list
+python -m ai_soc_agent rules list --json
+python -m ai_soc_agent rules validate
+```
+
+The manifest records each rule's ID, log sources, MITRE tactic and technique,
+severity, grouping dimensions, windows, required fields, and package entry
+point. Validation detects metadata drift and confirms that every entry point
+resolves to the registered executable rule. It never loads external rules or
+calls a network service.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -155,6 +173,7 @@ curl -H "Content-Type: application/json" \
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers
+│   │   ├── manifest.py    # auditable Sigma-compatible rule metadata
 │   │   ├── brute_force.py         # T1110
 │   │   ├── credential_stuffing.py # T1110.004
 │   │   ├── geo_anomaly.py         # T1078
@@ -166,7 +185,7 @@ curl -H "Content-Type: application/json" \
 │   ├── analyzer.py        # LLM triage (single-shot JSON)
 │   ├── reporter.py        # Markdown report renderer
 │   ├── server.py          # FastAPI /ingest, /alerts, /health
-│   └── cli.py             # Click CLI: ai-soc analyze | scan
+│   └── cli.py             # Click CLI: analyze | scan | rules
 ├── prompts/incident_triage/v1.yml
 ├── samples/               # ssh, nginx, okta, windows, mitre/
 ├── tests/

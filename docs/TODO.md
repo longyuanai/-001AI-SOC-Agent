@@ -71,4 +71,8 @@
 
 ## Phase-2 后续
 
+- `RULE-MANIFEST-001` Sigma-compatible 规则清单与审计已于
+  **2026-07-29 完成**；五个规则支持 `rules list` / `rules validate`。
+- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `FIELD-MAP-001`；
+  未经单独确认不提前实现 GeoIP、凭据指纹或持久状态。
 - `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。
