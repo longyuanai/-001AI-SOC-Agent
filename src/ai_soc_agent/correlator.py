@@ -13,6 +13,7 @@ from shared_llm_core.finding import Finding
 from shared_llm_core.rule_engine import RuleContext, RuleEngine
 
 from ai_soc_agent.config import DetectionConfig
+from ai_soc_agent.enrichment import enrich_events_geo
 from ai_soc_agent.field_mapping import map_events
 from ai_soc_agent.normalizer import NormalizedEvent, ensure_utc
 from ai_soc_agent.patterns import build_pattern_engine
@@ -249,8 +250,8 @@ def detect_patterns(
     engine: RuleEngine | None = None,
 ) -> list[Finding]:
     """Evaluate all MITRE patterns through the frozen v0.5 RuleEngine."""
-    mapped_events = map_events(events)
-    merged_facts: dict[str, Any] = {"events": tuple(mapped_events)}
+    prepared_events = enrich_events_geo(map_events(events))
+    merged_facts: dict[str, Any] = {"events": tuple(prepared_events)}
     if facts:
         merged_facts.update(facts)
     # Events may arrive as dicts from the gateway and with mixed tz-awareness,
@@ -258,7 +259,7 @@ def detect_patterns(
     timestamps = sorted(
         (
             ensure_utc(ts)
-            for event in mapped_events
+            for event in prepared_events
             if (ts := event_timestamp(event)) is not None
         ),
     )

@@ -142,6 +142,17 @@ Explicit upstream canonical values win, unknown vendor fields remain intact,
 and the operation is idempotent. The mapper does not perform network
 enrichment and never invents `continent` or credential fingerprint fields.
 
+## Upstream Geo enrichment
+
+Geo anomaly detection accepts continent metadata from an upstream SIEM or log
+shipper. `UpstreamGeoEnricher` recognizes canonical, dotted, and common nested
+fields, then normalizes names and codes to `AF/AN/AS/EU/NA/OC/SA`.
+
+Missing and invalid values receive an auditable `geo_enrichment_status`.
+Invalid canonical values are excluded from detection, so arbitrary strings
+cannot create a false cross-continent alert. This repository does not download
+a GeoIP database or make a network request.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -185,6 +196,7 @@ curl -H "Content-Type: application/json" \
 │   ├── config.py          # detection thresholds + suppression allowlists
 │   ├── normalizer.py      # NormalizedEvent dataclass (UTC-normalized)
 │   ├── field_mapping.py   # source fields → canonical detection aliases
+│   ├── enrichment.py      # offline upstream Geo validation/normalization
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers
