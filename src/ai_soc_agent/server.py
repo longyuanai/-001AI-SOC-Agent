@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from ai_soc_agent import __version__
 from ai_soc_agent.config import DetectionConfig
 from ai_soc_agent.correlator import Alert, correlate
+from ai_soc_agent.feedback import FeedbackLabel, FeedbackStore
 from ai_soc_agent.normalizer import NormalizedEvent
 from ai_soc_agent.state import WindowStateStore
 
@@ -69,6 +70,15 @@ class SplunkEnvelope(BaseModel):
     event: EventIn
 
 
+class FeedbackIn(BaseModel):
+    """Validated human disposition for one Finding or Alert ID."""
+
+    finding_id: str = Field(min_length=1)
+    label: Literal["true_positive", "false_positive", "needs_review"]
+    analyst: str = Field(min_length=1)
+    note: str = Field(default="", max_length=4_000)
+
+
 IngestPayload = EventBatch | SplunkEnvelope | list[EventIn] | EventIn
 
 
@@ -114,6 +124,7 @@ def create_app(
     *,
     max_events: int = 10_000,
     max_alerts: int = DEFAULT_MAX_ALERTS,
+    max_feedback: int = 5_000,
     max_correlation_events: int = DEFAULT_MAX_CORRELATION_EVENTS,
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
     api_token: str | None = None,
@@ -124,6 +135,8 @@ def create_app(
         raise ValueError("max_events must be positive")
     if max_alerts <= 0:
         raise ValueError("max_alerts must be positive")
+    if max_feedback <= 0:
+        raise ValueError("max_feedback must be positive")
     if max_correlation_events <= 0:
         raise ValueError("max_correlation_events must be positive")
 
@@ -141,6 +154,8 @@ def create_app(
     )
     app.state.store = store
     app.state.config = settings
+    feedback_store = FeedbackStore(max_records=max_feedback)
+    app.state.feedback_store = feedback_store
 
     def require_token(
         authorization: Annotated[str | None, Header()] = None,
@@ -247,6 +262,47 @@ def create_app(
             "count": len(selected),
             "total": len(alerts),
             "alerts": [alert.to_dict() for alert in selected],
+        }
+
+    @app.post(
+        "/feedback",
+        status_code=201,
+        dependencies=[Depends(require_token)],
+    )
+    def add_feedback(payload: FeedbackIn) -> dict[str, str]:
+        """Record an analyst label without changing a rule or threshold."""
+        return feedback_store.add(
+            finding_id=payload.finding_id,
+            label=FeedbackLabel(payload.label),
+            analyst=payload.analyst,
+            note=payload.note,
+        ).to_dict()
+
+    @app.get("/feedback")
+    def get_feedback(
+        finding_id: Annotated[str | None, Query()] = None,
+        label: Annotated[
+            Literal["true_positive", "false_positive", "needs_review"] | None,
+            Query(),
+        ] = None,
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        normalized_label = FeedbackLabel(label) if label is not None else None
+        records = feedback_store.query(
+            finding_id=finding_id,
+            label=normalized_label,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "count": len(records),
+            "total": feedback_store.count(
+                finding_id=finding_id,
+                label=normalized_label,
+            ),
+            "summary": feedback_store.summary(),
+            "feedback": [record.to_dict() for record in records],
         }
 
     return app

@@ -190,6 +190,22 @@ bounded five-minute cooldown. Its cache is capacity-limited and instance-local.
 CLI scans deliberately bypass cross-call suppression and always return the
 complete result for their submitted batch.
 
+## Analyst feedback
+
+The API records bounded human dispositions without changing rules online:
+
+```bash
+curl -H "Content-Type: application/json" \
+  --data-binary '{"finding_id":"<id>","label":"true_positive","analyst":"alice"}' \
+  http://127.0.0.1:8080/feedback
+curl http://127.0.0.1:8080/feedback
+```
+
+Allowed labels are `true_positive`, `false_positive`, and `needs_review`.
+Feedback writes use the same bearer-token policy as `/ingest`. Records support
+filtering, pagination, and label summaries; they never update a threshold,
+rule, or model automatically.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -236,6 +252,7 @@ curl -H "Content-Type: application/json" \
 │   ├── enrichment.py      # offline Geo + credential input validation
 │   ├── state.py           # bounded cross-batch event-time state
 │   ├── dedup.py           # Finding fingerprint cooldown suppression
+│   ├── feedback.py        # bounded human disposition records
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers

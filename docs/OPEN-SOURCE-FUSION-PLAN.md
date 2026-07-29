@@ -1,7 +1,7 @@
 # 001 AI-SOC-Agent · 开源能力融合实施方案
 
-> 状态：已确认，Phase F1/F2/F3 已完成
-> 基线：v0.6，235 passed（兄弟仓库齐全）
+> 状态：已确认，Phase F1–F4 已完成
+> 基线：v0.6，247 passed（兄弟仓库齐全）
 > 更新日期：2026-07-29
 
 ## 1. 目标与边界
@@ -356,3 +356,5 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
   内存状态，CLI/Adapter 保持无状态，13 个新增测试落地。
 - 2026-07-29：完成 `DEDUP-001`；稳定 Finding metadata fingerprint、
   有界 cooldown 策略和 Adapter 跨调用抑制，12 个新增测试落地。
+- 2026-07-29：完成 `FEEDBACK-001`；有界人工标签存储、鉴权 API、
+  过滤/汇总且不在线改规则，12 个新增测试落地。

@@ -83,6 +83,8 @@
   Server 持有状态，CLI/Adapter 继续纯批处理。
 - `DEDUP-001` Finding fingerprint 与有界 cooldown 已于 **2026-07-29 完成**；
   UUID/schema 不改，长期 Adapter 抑制重复，CLI 仍完整输出。
-- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `FEEDBACK-001`；
-  只记录人工标注，不在线自动修改规则。
+- `FEEDBACK-001` 有界人工 disposition store/API 已于 **2026-07-29 完成**；
+  只记录离线评估标签，不在线调整规则、阈值或模型。
+- 融合方案 F1–F4 已完成；下一开发阶段是明确延期到 v0.7 的
+  `SYSLOG-001`，或经依赖/许可证批准后的 `SIGMA-POC-001`。
 - `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。
