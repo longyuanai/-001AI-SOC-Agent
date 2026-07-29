@@ -178,6 +178,18 @@ across webhook requests. The store:
 Each FastAPI app owns its store. CLI scans and `SOCProductAdapter.scan()` remain
 pure batch operations with no hidden process-global history.
 
+## Finding deduplication
+
+Every rule-generated Finding includes a stable `metadata.fingerprint` derived
+from rule ID, correlation actor/host, and window start. The random Finding UUID
+and frozen shared schema remain unchanged; evidence and credential-derived
+values are never fingerprint inputs.
+
+A long-running `SOCProductAdapter` suppresses repeated fingerprints for a
+bounded five-minute cooldown. Its cache is capacity-limited and instance-local.
+CLI scans deliberately bypass cross-call suppression and always return the
+complete result for their submitted batch.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -223,6 +235,7 @@ curl -H "Content-Type: application/json" \
 │   ├── field_mapping.py   # source fields → canonical detection aliases
 │   ├── enrichment.py      # offline Geo + credential input validation
 │   ├── state.py           # bounded cross-batch event-time state
+│   ├── dedup.py           # Finding fingerprint cooldown suppression
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers

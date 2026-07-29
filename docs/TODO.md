@@ -81,6 +81,8 @@
   明文/旧式 hash 不进入检测副本，Finding evidence 强制脱敏。
 - `STATE-001` 有界跨批次 `WindowStateStore` 已于 **2026-07-29 完成**；
   Server 持有状态，CLI/Adapter 继续纯批处理。
-- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `DEDUP-001`；
-  Finding UUID 不改，通过 metadata fingerprint 和静默策略去重。
+- `DEDUP-001` Finding fingerprint 与有界 cooldown 已于 **2026-07-29 完成**；
+  UUID/schema 不改，长期 Adapter 抑制重复，CLI 仍完整输出。
+- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `FEEDBACK-001`；
+  只记录人工标注，不在线自动修改规则。
 - `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。

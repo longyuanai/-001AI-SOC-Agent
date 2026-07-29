@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from ipaddress import IPv4Address, ip_address
 from typing import Any, Mapping
@@ -40,6 +41,24 @@ def correlation_host(event: Any) -> str | None:
     return None
 
 
+def finding_fingerprint(
+    *,
+    metadata: Mapping[str, Any],
+    host: str | None,
+    ts: datetime | None,
+) -> str:
+    """Build a stable incident key without evidence, secrets, or random UUIDs."""
+    rule_id = str(metadata.get("rule_id", "unknown-rule"))
+    actor = str(metadata.get("actor") or host or "unknown-actor")
+    first_seen = str(
+        metadata.get("first_seen")
+        or (ts.isoformat() if ts is not None else "unknown-window")
+    )
+    material = "\x1f".join((rule_id, actor.casefold(), first_seen))
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return f"soc:{digest}"
+
+
 def build_soc_finding(
     *,
     severity: FindingSeverity,
@@ -54,6 +73,15 @@ def build_soc_finding(
     host: str | None = None,
 ) -> Finding:
     """Build a v0.5 Finding without modifying the frozen shared schema."""
+    finding_metadata = dict(metadata)
+    finding_metadata.setdefault(
+        "fingerprint",
+        finding_fingerprint(
+            metadata=finding_metadata,
+            host=host if host is not None else correlation_host(host_event),
+            ts=ts,
+        ),
+    )
     return Finding(
         id="",
         source=FindingSource.SOC,
@@ -65,5 +93,5 @@ def build_soc_finding(
         ts=ts,
         evidence=evidence,
         tags=tags,
-        metadata=metadata,
+        metadata=finding_metadata,
     )
