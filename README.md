@@ -153,6 +153,17 @@ Invalid canonical values are excluded from detection, so arbitrary strings
 cannot create a false cross-continent alert. This repository does not download
 a GeoIP database or make a network request.
 
+## Credential fingerprint enrichment
+
+Credential-stuffing correlation accepts only upstream fingerprints formatted
+as `hmac-sha256:<scope>:<64-hex>`. The scope isolates tenants or security
+domains; identical digests from different scopes do not correlate.
+
+Legacy hashes, short values, and plaintext-like input are removed from the
+detection copy without retaining their value. Finding evidence is rendered as
+`[credential redacted]`. AI-SOC-Agent never receives a plaintext password and
+does not derive password hashes itself.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -196,7 +207,7 @@ curl -H "Content-Type: application/json" \
 │   ├── config.py          # detection thresholds + suppression allowlists
 │   ├── normalizer.py      # NormalizedEvent dataclass (UTC-normalized)
 │   ├── field_mapping.py   # source fields → canonical detection aliases
-│   ├── enrichment.py      # offline upstream Geo validation/normalization
+│   ├── enrichment.py      # offline Geo + credential input validation
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers

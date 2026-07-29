@@ -32,7 +32,12 @@ from ai_soc_agent.patterns.base import (
     source_family,
 )
 
-_CREDENTIAL_KEYS = ("password_hash", "credential_hash", "password_fingerprint")
+_CREDENTIAL_KEYS = (
+    "credential_fingerprint",
+    "password_fingerprint",
+    "credential_hash",
+    "password_hash",
+)
 _USER_KEYS = ("user", "username", "remote_user", "account")
 
 

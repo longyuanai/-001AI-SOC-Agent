@@ -23,7 +23,7 @@
 | ID | 任务 | 状态 | 备注 |
 |----|------|------|------|
 | ENRICH-001 | GeoIP 富化 (`extra.continent`) | done | 上游 SIEM 提供，离线校验/规范化，不内置 GeoIP DB |
-| ENRICH-002 | 凭据指纹 (`extra.password_hash`) | pending | 没有它凭据填充规则只有 cross_source 分支是活的 |
+| ENRICH-002 | 凭据指纹 (`extra.password_hash`) | done | scoped HMAC 上游输入；无效/明文拒绝，evidence 脱敏 |
 | PERSIST-001 | 告警落盘 | pending | 目前纯内存,重启即丢 |
 
 ---
@@ -77,6 +77,8 @@
   **2026-07-29 完成**；未知 `extra` 保留，不做隐式网络富化。
 - `ENRICH-001` 上游 Geo metadata 校验与规范化已于 **2026-07-29 完成**；
   不下载 GeoIP 数据库、不增加生产依赖。
-- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `ENRICH-002`；
-  只接受不可逆、带域隔离的指纹，禁止接收或派生明文密码。
+- `ENRICH-002` scoped HMAC credential fingerprint 已于 **2026-07-29 完成**；
+  明文/旧式 hash 不进入检测副本，Finding evidence 强制脱敏。
+- 下一项按 `docs/OPEN-SOURCE-FUSION-PLAN.md` 执行 `STATE-001`；
+  先做有界内存实现，不引入数据库。
 - `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。

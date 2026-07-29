@@ -6,6 +6,7 @@ network requests, ships no GeoIP database, and adds no production dependency.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import Any, Iterable
 
@@ -23,6 +24,18 @@ _CONTINENT_NAMES = {
     "south america": "SA",
 }
 _GEO_ENRICHMENT_VERSION = "upstream-v1"
+_CREDENTIAL_ENRICHMENT_VERSION = "upstream-hmac-v1"
+_CREDENTIAL_KEYS = (
+    "credential_fingerprint",
+    "password_fingerprint",
+    "credential_hash",
+    "password_hash",
+)
+_FINGERPRINT_PATTERN = re.compile(
+    r"hmac-sha256:"
+    r"(?P<scope>[A-Za-z0-9][A-Za-z0-9._-]{0,63}):"
+    r"(?P<digest>[0-9a-fA-F]{64})"
+)
 
 
 def _normalize_continent(value: Any) -> str | None:
@@ -108,7 +121,80 @@ class UpstreamGeoEnricher:
         return [self.enrich_event(event) for event in events]
 
 
+def _credential_candidate(extra: dict[str, Any]) -> tuple[Any, str] | None:
+    for key in _CREDENTIAL_KEYS:
+        if key in extra:
+            return extra[key], key
+    return None
+
+
+def _normalize_credential_fingerprint(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = _FINGERPRINT_PATTERN.fullmatch(value.strip())
+    if match is None:
+        return None
+    scope = match.group("scope").casefold()
+    digest = match.group("digest").lower()
+    return f"hmac-sha256:{scope}:{digest}"
+
+
+def _credential_safe_evidence(event: NormalizedEvent) -> str:
+    """Describe a credential event without copying its secret-derived value."""
+    return (
+        f"{event.source} {event.action} {event.result} "
+        f"actor={event.actor} target={event.target} [credential redacted]"
+    )
+
+
+class UpstreamCredentialEnricher:
+    """Accept only scoped HMAC fingerprints supplied by a trusted upstream."""
+
+    def enrich_event(self, event: NormalizedEvent) -> NormalizedEvent:
+        """Return a detection copy without retaining unsafe credential values."""
+        extra = dict(event.extra)
+        if (
+            extra.get("credential_enrichment_version")
+            == _CREDENTIAL_ENRICHMENT_VERSION
+        ):
+            return replace(event, extra=extra)
+
+        candidate = _credential_candidate(extra)
+        extra["credential_enrichment_version"] = (
+            _CREDENTIAL_ENRICHMENT_VERSION
+        )
+        if candidate is None:
+            extra["credential_enrichment_status"] = "missing"
+            return replace(event, extra=extra)
+
+        supplied, source = candidate
+        # Remove every credential alias before branching. An invalid value may
+        # be plaintext or a reversible token, so it is never copied to the
+        # prepared event or an audit field.
+        for key in _CREDENTIAL_KEYS:
+            extra.pop(key, None)
+        extra["credential_enrichment_source"] = source
+        safe_raw = _credential_safe_evidence(event)
+
+        fingerprint = _normalize_credential_fingerprint(supplied)
+        if fingerprint is None:
+            extra["credential_enrichment_status"] = "invalid"
+            extra["credential_enrichment_reason"] = "invalid_format"
+            return replace(event, raw=safe_raw, extra=extra)
+
+        extra["password_fingerprint"] = fingerprint
+        extra["credential_enrichment_status"] = "provided"
+        return replace(event, raw=safe_raw, extra=extra)
+
+    def enrich_events(
+        self, events: Iterable[NormalizedEvent]
+    ) -> list[NormalizedEvent]:
+        """Enrich an event iterable once, preserving order."""
+        return [self.enrich_event(event) for event in events]
+
+
 UPSTREAM_GEO_ENRICHER = UpstreamGeoEnricher()
+UPSTREAM_CREDENTIAL_ENRICHER = UpstreamCredentialEnricher()
 
 
 def enrich_event_geo(event: NormalizedEvent) -> NormalizedEvent:
@@ -123,10 +209,26 @@ def enrich_events_geo(
     return UPSTREAM_GEO_ENRICHER.enrich_events(events)
 
 
+def enrich_event_credential(event: NormalizedEvent) -> NormalizedEvent:
+    """Validate one upstream credential fingerprint."""
+    return UPSTREAM_CREDENTIAL_ENRICHER.enrich_event(event)
+
+
+def enrich_events_credentials(
+    events: Iterable[NormalizedEvent],
+) -> list[NormalizedEvent]:
+    """Validate upstream credential fingerprints for an event iterable."""
+    return UPSTREAM_CREDENTIAL_ENRICHER.enrich_events(events)
+
+
 __all__ = [
     "CONTINENT_CODES",
+    "UPSTREAM_CREDENTIAL_ENRICHER",
     "UPSTREAM_GEO_ENRICHER",
+    "UpstreamCredentialEnricher",
     "UpstreamGeoEnricher",
+    "enrich_event_credential",
     "enrich_event_geo",
+    "enrich_events_credentials",
     "enrich_events_geo",
 ]
