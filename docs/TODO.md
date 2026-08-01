@@ -1,6 +1,6 @@
 # 001 AI-SOC-Agent · v0.1 TODO
 
-> **项目状态**: v0.7 · 270 passed（SYSLOG-001 + PERSIST-001 complete）
+> **项目状态**: v0.7 · 274 passed（contract stub: 273 passed + 1 skipped）
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
 
@@ -90,5 +90,7 @@
   `127.0.0.1:1514`，具备有限队列、丢弃/错误指标和优雅关闭。
 - `PERSIST-001` 于 **2026-08-01** 完成；默认仍纯内存，配置
   `SOC_ALERT_DB` 后用有界 SQLite 恢复 normalized Alert，不落原始日志。
+- `CONTRACT-STUB-001` 于 **2026-08-01** 完成；本仓 Finding 替身同步 v0.5
+  §9 的默认字段、产品枚举、confidence 校验及 cve/related 字段。
 - 下一开发候选是经依赖/许可证批准后的 `SIGMA-POC-001`，或明确需求后的
   RFC 5424/多实例外部状态；不在没有真实需求时增加运行时。

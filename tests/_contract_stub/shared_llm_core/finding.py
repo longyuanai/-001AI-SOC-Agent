@@ -7,42 +7,32 @@ Only the subset consumed by 001AI-SOC-Agent is reproduced. See
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 
-class FindingSeverity(Enum):
+class FindingSeverity(str, Enum):
     """Severity ladder shared by every product in the suite."""
 
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
     INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
-class FindingSource(Enum):
+class FindingSource(str, Enum):
     """Frozen product identifiers used for cross-product correlation."""
 
     SOC = "001"
     VULN = "002"
-    THREAT_INTEL = "003"
-    COMPLIANCE = "004"
-    FORENSICS = "005"
-    RESPONSE = "006"
-
-
-def _as_datetime(value: Any) -> datetime | None:
-    if value is None or isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    return None
+    LAB = "003"
+    CODE = "004"
+    REVERSE = "005"
+    FIRMWARE = "006"
+    EXTERNAL = "external"
 
 
 @dataclass(frozen=True)
@@ -54,51 +44,50 @@ class Finding:
     severity: FindingSeverity
     confidence: float
     title: str
-    description: str
+    description: str = ""
     host: str | None = None
+    cve: str | None = None
     ts: datetime | None = None
     evidence: tuple[str, ...] = ()
-    tags: frozenset[str] = field(default_factory=frozenset)
+    related: tuple[str, ...] = ()
+    tags: frozenset[str] = frozenset()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f"confidence must be in [0,1], got {self.confidence!r}")
         if not self.id:
             object.__setattr__(self, "id", str(uuid.uuid4()))
-        if not isinstance(self.evidence, tuple):
-            object.__setattr__(self, "evidence", tuple(self.evidence))
-        if not isinstance(self.tags, frozenset):
-            object.__setattr__(self, "tags", frozenset(self.tags))
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-serializable envelope shape."""
-        return {
-            "id": self.id,
-            "source": self.source.value,
-            "severity": self.severity.value,
-            "confidence": self.confidence,
-            "title": self.title,
-            "description": self.description,
-            "host": self.host,
-            "ts": self.ts.isoformat() if self.ts is not None else None,
-            "evidence": list(self.evidence),
-            "tags": sorted(self.tags),
-            "metadata": dict(self.metadata),
-        }
+        payload = asdict(self)
+        payload["source"] = self.source.value
+        payload["severity"] = self.severity.value
+        if self.ts is not None:
+            payload["ts"] = self.ts.isoformat()
+        payload["evidence"] = list(self.evidence)
+        payload["related"] = list(self.related)
+        payload["tags"] = sorted(self.tags)
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "Finding":
         """Rebuild a Finding from its ``to_dict`` envelope."""
-        evidence: Sequence[str] = payload.get("evidence", ())
-        return cls(
-            id=str(payload.get("id", "")),
-            source=FindingSource(payload["source"]),
-            severity=FindingSeverity(payload["severity"]),
-            confidence=float(payload.get("confidence", 0.0)),
-            title=str(payload.get("title", "")),
-            description=str(payload.get("description", "")),
-            host=payload.get("host"),
-            ts=_as_datetime(payload.get("ts")),
-            evidence=tuple(str(item) for item in evidence),
-            tags=frozenset(payload.get("tags", ())),
-            metadata=dict(payload.get("metadata", {})),
-        )
+        known = {item.name for item in cls.__dataclass_fields__.values()}
+        clean: dict[str, Any] = {
+            key: value for key, value in payload.items() if key in known
+        }
+        if "source" in clean and isinstance(clean["source"], str):
+            clean["source"] = FindingSource(clean["source"])
+        if "severity" in clean and isinstance(clean["severity"], str):
+            clean["severity"] = FindingSeverity(clean["severity"])
+        if "ts" in clean and isinstance(clean["ts"], str):
+            clean["ts"] = datetime.fromisoformat(clean["ts"])
+        if "evidence" in clean and isinstance(clean["evidence"], list):
+            clean["evidence"] = tuple(clean["evidence"])
+        if "related" in clean and isinstance(clean["related"], list):
+            clean["related"] = tuple(clean["related"])
+        if "tags" in clean and isinstance(clean["tags"], list):
+            clean["tags"] = frozenset(clean["tags"])
+        return cls(**clean)
