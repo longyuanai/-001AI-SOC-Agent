@@ -1,6 +1,6 @@
 # 001 AI-SOC-Agent · v0.1 TODO
 
-> **项目状态**: v0.6 · 154 passed + 4 skipped(跨仓库)
+> **项目状态**: v0.7 · 260 passed（SYSLOG-001 complete）
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
 
@@ -25,6 +25,7 @@
 | ENRICH-001 | GeoIP 富化 (`extra.continent`) | done | 上游 SIEM 提供，离线校验/规范化，不内置 GeoIP DB |
 | ENRICH-002 | 凭据指纹 (`extra.password_hash`) | done | scoped HMAC 上游输入；无效/明文拒绝，evidence 脱敏 |
 | PERSIST-001 | 告警落盘 | pending | 目前纯内存,重启即丢 |
+| SYSLOG-001 | 有界 UDP syslog 实时接入 | done | 2026-08-01: 默认 1514、背压计数、坏报文隔离、优雅关闭 |
 
 ---
 
@@ -85,6 +86,7 @@
   UUID/schema 不改，长期 Adapter 抑制重复，CLI 仍完整输出。
 - `FEEDBACK-001` 有界人工 disposition store/API 已于 **2026-07-29 完成**；
   只记录离线评估标签，不在线调整规则、阈值或模型。
-- 融合方案 F1–F4 已完成；下一开发阶段是明确延期到 v0.7 的
-  `SYSLOG-001`，或经依赖/许可证批准后的 `SIGMA-POC-001`。
-- `SYSLOG-001` 实时 UDP syslog 接入明确延期到 **v0.7**；本轮不实现、不绑定端口。
+- 融合方案 F1–F5 已完成；`SYSLOG-001` 于 **2026-08-01** 完成，默认绑定
+  `127.0.0.1:1514`，具备有限队列、丢弃/错误指标和优雅关闭。
+- 下一开发候选是 `PERSIST-001`，或经依赖/许可证批准后的
+  `SIGMA-POC-001`；两者均需先明确数据保留或外部规则需求。

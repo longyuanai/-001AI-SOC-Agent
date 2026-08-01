@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -253,6 +254,101 @@ def scan(input_json: str | None, log_file: str | None, json_output: bool) -> Non
         click.echo(f"- [{finding['severity']}] {finding['title']}")
 
 
+async def _serve_syslog(
+    *,
+    host: str,
+    port: int,
+    queue_size: int,
+    json_output: bool,
+) -> None:
+    """Run the bounded UDP receiver until the process is interrupted."""
+    from ai_soc_agent.config import DetectionConfig
+    from ai_soc_agent.dedup import FindingDeduplicator
+    from ai_soc_agent.ingest import SyslogUDPReceiver
+    from ai_soc_agent.state import WindowStateStore
+
+    settings = DetectionConfig.for_stream()
+    state = WindowStateStore()
+    deduplicator = FindingDeduplicator()
+
+    def handle(event: NormalizedEvent) -> None:
+        state.append([event])
+        findings = detect_patterns(
+            state.snapshot(limit=5_000),
+            facts={
+                **settings.as_facts(),
+                "credential_stuffing_mode": "cross_source",
+            },
+        )
+        emitted = [finding for finding in findings if deduplicator.accept(finding).accepted]
+        if not emitted:
+            return
+        serialized = []
+        for finding in emitted:
+            item = finding.to_dict()
+            item.pop("source")
+            serialized.append(item)
+        if json_output:
+            click.echo(
+                json.dumps(
+                    {"findings": serialized},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+            return
+        for item in serialized:
+            click.echo(f"[{item['severity']}] {item['title']}")
+
+    receiver = SyslogUDPReceiver(handle, queue_size=queue_size)
+    address = await receiver.start(host=host, port=port)
+    click.echo(
+        f"Listening for RFC 3164 sshd syslog on udp://{address[0]}:{address[1]}",
+        err=True,
+    )
+    try:
+        await asyncio.Future()
+    finally:
+        await receiver.close()
+        click.echo(
+            json.dumps(receiver.health(), ensure_ascii=False, default=str),
+            err=True,
+        )
+
+
+@cli.command("syslog")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", type=click.IntRange(0, 65_535), default=1514, show_default=True)
+@click.option(
+    "--queue-size",
+    type=click.IntRange(min=1),
+    default=1_024,
+    show_default=True,
+    help="Maximum datagrams waiting for parsing.",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Emit one Finding envelope per detected incident.",
+)
+def syslog_command(host: str, port: int, queue_size: int, json_output: bool) -> None:
+    """Receive RFC 3164 sshd events over bounded UDP (default port 1514)."""
+    try:
+        asyncio.run(
+            _serve_syslog(
+                host=host,
+                port=port,
+                queue_size=queue_size,
+                json_output=json_output,
+            )
+        )
+    except KeyboardInterrupt:
+        click.echo("Syslog receiver stopped.", err=True)
+    except OSError as exc:
+        raise click.ClickException(f"could not bind UDP syslog listener: {exc}") from exc
+
+
 @cli.command()
 @click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True))
 @click.option("--output", "-o", "output_path", default="-", type=click.Path())
@@ -290,7 +386,7 @@ def analyze(input_path: str, output_path: str, log_type: str, provider: str) -> 
     try:
         with LLMRouter.from_env() as router:
             assessment = analyze_events(events, router)
-    except AssessmentError as exc:
+    except (AssessmentError, ValueError) as exc:
         raise click.ClickException(f"LLM triage failed: {exc}") from exc
 
     report = render_markdown(events, assessment, source_path=input_path)

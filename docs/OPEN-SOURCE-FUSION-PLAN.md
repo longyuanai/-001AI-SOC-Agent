@@ -1,6 +1,6 @@
 # 001 AI-SOC-Agent · 开源能力融合实施方案
 
-> 状态：已确认，Phase F1–F4 已完成
+> 状态：已确认，Phase F1–F5 已完成
 > 基线：v0.6，247 passed（兄弟仓库齐全）
 > 更新日期：2026-07-29
 
@@ -358,3 +358,5 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
   有界 cooldown 策略和 Adapter 跨调用抑制，12 个新增测试落地。
 - 2026-07-29：完成 `FEEDBACK-001`；有界人工标签存储、鉴权 API、
   过滤/汇总且不在线改规则，12 个新增测试落地。
+- 2026-08-01：完成 `SYSLOG-001`；标准库 asyncio UDP 接收器、默认
+  1514、有限队列、坏报文隔离、运行指标和优雅关闭落地。

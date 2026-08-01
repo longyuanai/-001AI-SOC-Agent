@@ -10,6 +10,7 @@ from typing import Any
 from ai_soc_agent.adapter import SOCProductAdapter
 from ai_soc_agent.config import DetectionConfig, Suppression
 from ai_soc_agent.correlator import Alert, correlate, detect_credential_stuffing
+from ai_soc_agent.ingest import SyslogUDPReceiver
 from ai_soc_agent.normalizer import NormalizedEvent, ensure_utc
 from ai_soc_agent.parsers import iter_file, parse_file, parse_line
 
@@ -22,6 +23,7 @@ __all__ = [
     "NormalizedEvent",
     "SOCProductAdapter",
     "Suppression",
+    "SyslogUDPReceiver",
     "analyze_events",
     "correlate",
     "detect_credential_stuffing",

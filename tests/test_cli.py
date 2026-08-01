@@ -41,3 +41,39 @@ def test_cli_analyze_help_lists_evtx_log_type():
     assert "evtx" in res.output
     assert "nginx" in res.output
     assert "okta" in res.output
+
+
+def test_cli_syslog_help_uses_unprivileged_defaults():
+    runner = CliRunner()
+    res = runner.invoke(cli, ["syslog", "--help"])
+
+    assert res.exit_code == 0
+    assert "1514" in res.output
+    assert "127.0.0.1" in res.output
+    assert "--queue-size" in res.output
+
+
+def test_cli_syslog_rejects_non_positive_queue_size():
+    runner = CliRunner()
+    res = runner.invoke(cli, ["syslog", "--queue-size", "0"])
+
+    assert res.exit_code != 0
+    assert "Invalid value for '--queue-size'" in res.output
+
+
+def test_cli_syslog_help_uses_unprivileged_defaults():
+    runner = CliRunner()
+    res = runner.invoke(cli, ["syslog", "--help"])
+
+    assert res.exit_code == 0
+    assert "1514" in res.output
+    assert "127.0.0.1" in res.output
+    assert "--queue-size" in res.output
+
+
+def test_cli_syslog_rejects_non_positive_queue_size():
+    runner = CliRunner()
+    res = runner.invoke(cli, ["syslog", "--queue-size", "0"])
+
+    assert res.exit_code != 0
+    assert "Invalid value for '--queue-size'" in res.output

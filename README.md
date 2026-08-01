@@ -178,6 +178,25 @@ across webhook requests. The store:
 Each FastAPI app owns its store. CLI scans and `SOCProductAdapter.scan()` remain
 pure batch operations with no hidden process-global history.
 
+## Real-time syslog (v0.7)
+
+The minimal live path receives RFC 3164 OpenSSH messages over UDP. It binds
+localhost on unprivileged port 1514 by default, uses a bounded in-memory queue,
+isolates malformed datagrams, and reports accepted/dropped/error counters when
+it stops:
+
+```bash
+python -m ai_soc_agent syslog --host 127.0.0.1 --port 1514 --json
+```
+
+Each detected incident is emitted as one JSON line using the existing
+`{"findings":[...]}` envelope. Startup and shutdown health messages go to
+stderr, so stdout remains machine-readable. Exposing UDP beyond localhost
+requires an explicit `--host` and appropriate host firewall controls. UDP has
+no delivery guarantee; forwarders should retain their own retry/buffering
+policy. Kafka, Redis Streams, RFC 5424 structured data, and privileged port 514
+remain outside this minimal receiver.
+
 ## Finding deduplication
 
 Every rule-generated Finding includes a stable `metadata.fingerprint` derived
@@ -251,6 +270,7 @@ curl -H "Content-Type: application/json" \
 │   ├── field_mapping.py   # source fields → canonical detection aliases
 │   ├── enrichment.py      # offline Geo + credential input validation
 │   ├── state.py           # bounded cross-batch event-time state
+│   ├── ingest.py          # bounded asyncio UDP syslog receiver
 │   ├── dedup.py           # Finding fingerprint cooldown suppression
 │   ├── feedback.py        # bounded human disposition records
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers

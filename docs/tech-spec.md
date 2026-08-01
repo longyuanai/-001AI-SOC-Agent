@@ -261,20 +261,22 @@ class SOCPattern(Rule):
 
 - `feat(findings): enrich host field for cross-product correlation`
 
-### 14.3 Hook C · 实时 syslog 接入(v0.7)
+### 14.3 Hook C · 实时 syslog 接入(v0.7，已完成)
 
-**目标**:从 stdin/file 升级到 syslog UDP 514 接收,接 systemd-journal / CloudWatch。
+**目标**:从 stdin/file 升级到 syslog UDP 接收，并允许 systemd-journal / CloudWatch
+通过上游 forwarder 投递；默认使用非特权端口 1514。
 
-**改动范围**(Codex 自行决定):
+**已实现范围**:
 
-- `src/ai_soc_agent/ingest.py` 新增 `SyslogUDPReceiver`(asyncio + `datagrams` protocol)
-- `src/ai_soc_agent/cli.py` 新增 `--syslog --port 514` 启动选项
-- `tests/test_syslog_receiver.py` —— mock UDP packet,验证解析 + 触发 correlation
+- `src/ai_soc_agent/ingest.py` 新增 `SyslogUDPReceiver`(`asyncio.DatagramProtocol`)
+- `src/ai_soc_agent/cli.py` 新增 `syslog --host --port --queue-size --json`
+- `tests/test_syslog_receiver.py` 覆盖 mock/真实 UDP、背压、坏报文、关闭和 correlation
 
-**约束**(派活时再定,本文档仅描述方向):
+**边界**:
 
 - **不**绑 514 < 1024 端口(非 root 起不来),默认用 1514
 - **不**改 v0.5 §15 CLI envelope
+- 本轮只接 RFC 3164 OpenSSH；RFC 5424/Kafka/Redis Streams 保持后续可选项
 
 ### 14.4 不要做的事
 
