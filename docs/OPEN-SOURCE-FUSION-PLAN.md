@@ -1,8 +1,9 @@
 # 001 AI-SOC-Agent · 开源能力融合实施方案
 
-> 状态：已确认，Phase F1–F5 已完成
-> 基线：v0.6，247 passed（兄弟仓库齐全）
-> 更新日期：2026-07-29
+> 状态：已确认，Phase F1–F5 + PERSIST-001 已完成
+> 基线：v0.7，274 passed（兄弟仓库齐全）
+> 更新日期：2026-08-01
+> 后续路线：以 [`COMMERCIAL-READINESS.md`](./COMMERCIAL-READINESS.md) 为准
 
 ## 1. 目标与边界
 
@@ -313,6 +314,10 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
 
 ## 9. 建议的 issue 顺序
 
+以下是开源能力融合阶段的历史实施顺序，F1–F5 已完成。商业化关键路径已切换到
+`SEC-AUTH-001` → `OBS-001` → `EVAL-001` → `PERF-001` → `OPS-001` →
+`SUPPLY-001`；`SIGMA-POC-001` 保持条件式可选项。
+
 | 顺序 | Issue | 结果 |
 |---|---|---|
 | 1 | RULE-MANIFEST-001 | 五个模式拥有统一、可校验的 Sigma-compatible manifest |
@@ -360,3 +365,7 @@ poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' -
   过滤/汇总且不在线改规则，12 个新增测试落地。
 - 2026-08-01：完成 `SYSLOG-001`；标准库 asyncio UDP 接收器、默认
   1514、有限队列、坏报文隔离、运行指标和优雅关闭落地。
+- 2026-08-01：完成 `PERSIST-001`；默认纯内存，可选有界 SQLite Alert
+  恢复，不持久化原始日志。
+- 2026-08-01：冻结商业化 C1-C3 技术基线；后续实现以
+  `COMMERCIAL-READINESS.md` 的 Go/No-Go gate 为准。

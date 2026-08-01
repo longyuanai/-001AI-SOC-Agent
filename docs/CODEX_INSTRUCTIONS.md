@@ -2,6 +2,9 @@
 
 > **目的**: 给 Codex（或其他 AI agent）派活时，复制对应模板、改 ID 即可
 > **协作模式**: 我（人工）出 spec + 模板，Codex 写代码 + 测试，每个 issue 一来一回
+> **商业化任务**: 001 仓的 `SEC-*` / `OBS-*` / `EVAL-*` / `PERF-*` / `OPS-*` /
+> `SUPPLY-*` issue 必须额外先读 `docs/COMMERCIAL-READINESS.md`，并满足对应
+> Go/No-Go gate；产品级文档优先于本通用模板。
 
 ---
 
@@ -17,6 +20,7 @@
 ## ⚠️ 必须先 Read 的 6 个文件（跨项目依赖）
 1. <E:\...\XXX\docs\tech-spec.md>             — 本项目业务方案
 2. <E:\...\XXX\docs\TODO.md>                   — 本项目 issue 清单 + 上下文
+   商业化 issue 另读 <E:\...\XXX\docs\COMMERCIAL-READINESS.md>
 3. <E:\...\000shared-llm-core\docs\v0.1-contract.md>  — 共享接口契约 (已冻结!)
 4. <E:\...\000shared-llm-core\src\shared_llm_core\__init__.py>  — 共享 API 真实导出
 5. <E:\...\XXX\src\<pkg>\config.py>            — 阈值/抑制名单唯一事实源（如该项目有）

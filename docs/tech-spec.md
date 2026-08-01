@@ -24,6 +24,10 @@
 
 **不是** SIEM 替代品,是 SOC 工程师的 AI 副驾驶。
 
+商业目标是可私有化部署的检测与告警解释引擎，优先接入客户已有 ELK、Splunk、
+Wazuh 或 IntegrationGateway。原始日志长期存储、资产管理和不可逆响应不属于本产品。
+完整商业化控制与上线门禁见 [`COMMERCIAL-READINESS.md`](./COMMERCIAL-READINESS.md)。
+
 ## 3. 关键能力（MoSCoW）
 
 | 优先级 | 能力 | 说明 |
@@ -147,6 +151,10 @@ CLI 命令 `ai-soc analyze -i FILE -o REPORT.md`。
 - Server (Stage 2): Docker + FastAPI :8080
 - 接 ELK: webhook `POST /ingest`
 
+部署等级分为 Developer、Internal Pilot、Single-tenant Production 和
+Multi-tenant SaaS。当前只批准 Developer/Internal Pilot 单节点受控部署；达到
+`COMMERCIAL-READINESS.md` 对应 Go/No-Go gate 前不得承诺生产 SLA。
+
 ## 9. 评估指标
 
 | 指标 | 目标 |
@@ -160,10 +168,12 @@ CLI 命令 `ai-soc analyze -i FILE -o REPORT.md`。
 
 | 阶段 | 内容 |
 |------|------|
-| **PoC (当前)** | SSH 解析 + 严重度评分 + CLI, 15/15 测试 |
-| **v0.1** | + Windows / Nginx / Okta 解析 + 关联规则 + FastAPI |
-| **v0.5** | + 自定义规则 DSL + Kafka 接入 |
-| **v1.0** | + 实时流 + 多租户 + Web UI |
+| **PoC** | SSH 解析 + 严重度评分 + CLI |
+| **v0.1** | Windows / Nginx / Okta + 关联规则 + FastAPI |
+| **v0.5-v0.7（当前）** | RuleEngine、Finding/Gateway、模式库、syslog、SQLite Alert |
+| **Commercial C1** | auth/RBAC、metrics、质量评估、性能、runbook、供应链门禁 |
+| **Commercial C2** | TCP/TLS syslog、durable state、可靠 delivery、规则运维、签名发布 |
+| **Commercial C3** | tenant isolation、OIDC/SSO、HA、数据治理和 SLA 支持 |
 
 ## 11. 接口契约
 
@@ -185,7 +195,8 @@ CLI 命令 `ai-soc analyze -i FILE -o REPORT.md`。
 
 ## 14. Phase-2 实施(v0.6+ 改造指令)
 
-> **本文是 Codex 实施 Phase-2 的入口**。§3 路线图 v0.6 之后所有改动以此为准。
+> **本文是 Codex 实施 Phase-2 的入口**。§14 管理 v0.6-v0.7 改造；商业化后续
+> 改动以 §15 和 `COMMERCIAL-READINESS.md` 为准。
 
 ### 14.1 Hook A · MITRE ATT&CK 攻击模式库(v0.6)
 
@@ -301,7 +312,8 @@ poetry run pytest -q --tb=short
 poetry run python -m ai_soc_agent scan --input '{"source":"sshd","events":[]}' --json
 ```
 
-预期:154 passed + 4 skipped(跨仓库测试,缺 `000shared-*` 时自动跳过)。
+当前预期:真实 shared-core 模式 `274 passed`；contract stub 模式
+`273 passed + 1 skipped`（跨仓库测试自动跳过）。
 CLI envelope 是 `{"findings": [...]}` —— **只有 findings 一个键**,由
 `tests/test_cli_envelope.py::test_scan_sshd_returns_envelope` 冻结。
 
@@ -313,5 +325,23 @@ CLI envelope 是 `{"findings": [...]}` —— **只有 findings 一个键**,由
 
 ---
 
-**最近修订**: 2026-07-25 · Claude 把 PHASE-2.md 合并进 §14
-**下次回看触发**: v0.6 启动 / Hook A/B/C 任一完工 / 跨产品 correlation 派活启动
+## 15. 商业化技术门禁（v1.0 前置）
+
+商业版本以 [`COMMERCIAL-READINESS.md`](./COMMERCIAL-READINESS.md) 为唯一详细基线。
+本节冻结最小原则：
+
+1. 确定性检测必须在 LLM、数据库和下游不可用时可降级运行。
+2. 生产入口必须 fail closed，具备客户端身份、RBAC、限流、审计和 TLS。
+3. 原始日志不持久化；敏感 evidence、LLM 输入、日志和指标执行最小化。
+4. UDP 仅为 best-effort 兼容路径；商用可靠接入必须提供 TCP/TLS 或可靠消息。
+5. 有状态组件必须具备容量、保留、租户隔离、备份、恢复和迁移策略。
+6. 发布必须通过功能、契约、性能、安全、供应链和回滚门禁。
+7. 未完成对应 Go/No-Go gate 时不得宣称 Production 或 Multi-tenant ready。
+
+下一代码 issue 为 `SEC-AUTH-001`，随后依次实施 OBS、EVAL、PERF、OPS 和 SUPPLY。
+任何新生产依赖必须在对应 issue 内完成许可证、安全和退出方案审批。
+
+---
+
+**最近修订**: 2026-08-01 · 增加商业化技术基线和 C1-C3 上线门禁
+**下次回看触发**: Commercial C1 任一 issue 完成 / 部署等级变化 / 新外部依赖

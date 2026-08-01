@@ -1,8 +1,9 @@
-# 001 AI-SOC-Agent · v0.1 TODO
+# 001 AI-SOC-Agent · v0.7 / Commercial TODO
 
 > **项目状态**: v0.7 · 274 passed（contract stub: 273 passed + 1 skipped）
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
+> **商用基线**: [COMMERCIAL-READINESS.md](./COMMERCIAL-READINESS.md)
 
 ---
 
@@ -92,5 +93,43 @@
   `SOC_ALERT_DB` 后用有界 SQLite 恢复 normalized Alert，不落原始日志。
 - `CONTRACT-STUB-001` 于 **2026-08-01** 完成；本仓 Finding 替身同步 v0.5
   §9 的默认字段、产品枚举、confidence 校验及 cve/related 字段。
-- 下一开发候选是经依赖/许可证批准后的 `SIGMA-POC-001`，或明确需求后的
-  RFC 5424/多实例外部状态；不在没有真实需求时增加运行时。
+- 商业化下一实施项改为 `SEC-AUTH-001`；`SIGMA-POC-001` 不在 C1 关键路径，
+  只有客户提出外部 Sigma 规则需求并完成依赖/许可证评审后才启动。
+
+---
+
+## Commercial C1 · Internal Pilot 必做
+
+| 顺序 | ID | 任务 | 状态 | 商用验收 |
+|---:|---|---|---|---|
+| 1 | COMM-DOC-001 | 商业化技术基线、SLO、威胁模型和上线门禁 | done | 文档与 issue 路线一致 |
+| 2 | SEC-AUTH-001 | API client auth + RBAC + fail closed | pending | 权限矩阵、审计、≥15 tests |
+| 3 | OBS-001 | structured logs + metrics + readiness | pending | 无敏感标签、≥12 tests |
+| 4 | EVAL-001 | golden dataset + precision/recall 评估器 | pending | 报告可复现、阈值有证据 |
+| 5 | PERF-001 | steady/burst/soak benchmark | pending | 参考环境达到 C1 SLO |
+| 6 | OPS-001 | 部署、备份、恢复、升级、回滚 runbook | pending | 空机部署和恢复演练通过 |
+| 7 | SUPPLY-001 | CI 安全与供应链门禁 | pending | scan、SBOM、镜像检查、制品策略 |
+
+## Commercial C2 · Single-tenant Production
+
+| 顺序 | ID | 任务 | 状态 |
+|---:|---|---|---|
+| 8 | INGEST-002 | RFC 5424 + syslog TCP/TLS | pending |
+| 9 | DATA-002 | 外部 durable alert/state + migration | pending |
+| 10 | DELIVERY-001 | 幂等、retry、dead-letter Finding delivery | pending |
+| 11 | RULE-OPS-001 | 规则版本、灰度、审批和回滚 | pending |
+| 12 | SEC-HARDEN-001 | threat model delta + 安全测试 | pending |
+| 13 | RELEASE-001 | SemVer、SBOM、provenance、签名和升级 | pending |
+
+## Commercial C3 · Multi-tenant Commercial Service
+
+| 顺序 | ID | 任务 | 状态 |
+|---:|---|---|---|
+| 14 | TENANT-001 | 端到端 tenant isolation | pending |
+| 15 | IDP-001 | OIDC/SSO 与客户角色映射 | pending |
+| 16 | HA-001 | 多副本、故障转移、RPO/RTO | pending |
+| 17 | GOVERNANCE-001 | 保留、导出、删除和审计治理 | pending |
+| 18 | SUPPORT-001 | SLA、值班、事件响应和客户通知 | pending |
+
+Commercial issue 必须遵守：一个 issue 一个 commit；新增生产依赖先评审许可证、
+漏洞、维护责任和退出方案；未完成 gate 不升级部署等级描述。

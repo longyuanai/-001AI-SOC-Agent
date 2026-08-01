@@ -3,6 +3,11 @@
 > AI log-analysis copilot for SOC analysts — Stage-1 happy path.
 > First project of the **longyuanai AI Security Agent suite**.
 
+Current maturity: **v0.7 engineering beta / controlled internal pilot only**.
+It is not yet approved for an enterprise production SLA or multi-tenant SaaS.
+See [Commercial readiness](docs/COMMERCIAL-READINESS.md) for the target
+architecture, SLOs, threat model, delivery gates, and ordered implementation backlog.
+
 ## What it does (PoC)
 
 Parses an OpenSSH `auth.log` file, normalizes each line into a structured
@@ -318,6 +323,9 @@ curl -H "Content-Type: application/json" \
 
 ## Next steps (out of PoC scope)
 
-See `docs/tech-spec.md` for the full v0.3 / v0.6 / v1.0 roadmap.
-The PoC covers the Stage-1 happy path only; multi-step ReAct agents,
-context aggregation, and protocol emulators land in v0.3.
+Commercial C1 starts with `SEC-AUTH-001`, then observability, detection-quality
+evaluation, performance/soak testing, operations runbooks, and supply-chain
+gates. RFC 5424/TCP/TLS, durable shared state, reliable delivery, HA, and
+multi-tenant controls belong to later gates. See
+[`docs/COMMERCIAL-READINESS.md`](docs/COMMERCIAL-READINESS.md); passing unit
+tests alone does not make the service production-ready.
