@@ -1,6 +1,6 @@
 # 001 AI-SOC-Agent · v0.1 TODO
 
-> **项目状态**: v0.7 · 260 passed（SYSLOG-001 complete）
+> **项目状态**: v0.7 · 270 passed（SYSLOG-001 + PERSIST-001 complete）
 > **共享接口**: [v0.1-contract.md](../../000shared-llm-core/docs/v0.1-contract.md) (已冻结)
 > **派活模板**: [CODEX_INSTRUCTIONS.md](../../CODEX_INSTRUCTIONS.md)
 
@@ -24,7 +24,7 @@
 |----|------|------|------|
 | ENRICH-001 | GeoIP 富化 (`extra.continent`) | done | 上游 SIEM 提供，离线校验/规范化，不内置 GeoIP DB |
 | ENRICH-002 | 凭据指纹 (`extra.password_hash`) | done | scoped HMAC 上游输入；无效/明文拒绝，evidence 脱敏 |
-| PERSIST-001 | 告警落盘 | pending | 目前纯内存,重启即丢 |
+| PERSIST-001 | 告警落盘 | done | 2026-08-01: 可选有界 SQLite，仅存 normalized Alert |
 | SYSLOG-001 | 有界 UDP syslog 实时接入 | done | 2026-08-01: 默认 1514、背压计数、坏报文隔离、优雅关闭 |
 
 ---
@@ -88,5 +88,7 @@
   只记录离线评估标签，不在线调整规则、阈值或模型。
 - 融合方案 F1–F5 已完成；`SYSLOG-001` 于 **2026-08-01** 完成，默认绑定
   `127.0.0.1:1514`，具备有限队列、丢弃/错误指标和优雅关闭。
-- 下一开发候选是 `PERSIST-001`，或经依赖/许可证批准后的
-  `SIGMA-POC-001`；两者均需先明确数据保留或外部规则需求。
+- `PERSIST-001` 于 **2026-08-01** 完成；默认仍纯内存，配置
+  `SOC_ALERT_DB` 后用有界 SQLite 恢复 normalized Alert，不落原始日志。
+- 下一开发候选是经依赖/许可证批准后的 `SIGMA-POC-001`，或明确需求后的
+  RFC 5424/多实例外部状态；不在没有真实需求时增加运行时。

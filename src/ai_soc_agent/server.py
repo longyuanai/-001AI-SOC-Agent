@@ -5,8 +5,11 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from threading import Lock
 from typing import Annotated, Any, Literal
 
@@ -18,6 +21,7 @@ from ai_soc_agent.config import DetectionConfig
 from ai_soc_agent.correlator import Alert, correlate
 from ai_soc_agent.feedback import FeedbackLabel, FeedbackStore
 from ai_soc_agent.normalizer import NormalizedEvent
+from ai_soc_agent.persistence import SQLiteAlertRepository, alert_identity
 from ai_soc_agent.state import WindowStateStore
 
 logger = logging.getLogger(__name__)
@@ -88,6 +92,7 @@ class _Store:
     max_alerts: int
     max_correlation_events: int
     alerts: dict[tuple[str, str], Alert] = field(default_factory=dict)
+    repository: SQLiteAlertRepository | None = None
     lock: Lock = field(default_factory=Lock)
 
     @property
@@ -129,6 +134,7 @@ def create_app(
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
     api_token: str | None = None,
     config: DetectionConfig | None = None,
+    alert_db_path: str | Path | None = None,
 ) -> FastAPI:
     """Create an isolated API application with an in-memory event store."""
     if max_events <= 0:
@@ -142,8 +148,25 @@ def create_app(
 
     token = api_token if api_token is not None else os.environ.get("SOC_API_TOKEN")
     settings = config if config is not None else DetectionConfig.for_stream()
+    configured_db = (
+        alert_db_path if alert_db_path is not None else os.environ.get("SOC_ALERT_DB")
+    )
+    repository = (
+        SQLiteAlertRepository(configured_db, max_alerts=max_alerts)
+        if configured_db
+        else None
+    )
+    restored = repository.load() if repository is not None else []
 
-    app = FastAPI(title="AI-SOC-Agent", version=__version__)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            if repository is not None:
+                repository.close()
+
+    app = FastAPI(title="AI-SOC-Agent", version=__version__, lifespan=lifespan)
     store = _Store(
         event_state=WindowStateStore(
             max_events=max_events,
@@ -151,6 +174,8 @@ def create_app(
         ),
         max_alerts=max_alerts,
         max_correlation_events=max_correlation_events,
+        alerts={_identity(alert): alert for alert in restored},
+        repository=repository,
     )
     app.state.store = store
     app.state.config = settings
@@ -189,6 +214,7 @@ def create_app(
             "version": __version__,
             "events": events,
             "alerts": alerts,
+            "persistence": "sqlite" if store.repository is not None else "memory",
         }
 
     @app.post("/ingest", status_code=202, dependencies=[Depends(require_token)])
@@ -210,18 +236,28 @@ def create_app(
         correlated = correlate(candidates, config=settings)
 
         with store.lock:
+            next_alerts = dict(store.alerts)
             created: list[Alert] = []
+            changed: list[Alert] = []
             for alert in correlated:
                 identity = _identity(alert)
-                previous = store.alerts.get(identity)
+                previous = next_alerts.get(identity)
                 if previous is None:
                     created.append(alert)
                 elif alert.event_count <= previous.event_count:
                     continue
-                store.alerts[identity] = alert
-            while len(store.alerts) > store.max_alerts:
-                store.alerts.pop(next(iter(store.alerts)))
-            total_alerts = len(store.alerts)
+                next_alerts[identity] = alert
+                changed.append(alert)
+            evicted: list[Alert] = []
+            while len(next_alerts) > store.max_alerts:
+                evicted.append(next_alerts.pop(next(iter(next_alerts))))
+            if store.repository is not None:
+                store.repository.apply(
+                    changed,
+                    deleted=(alert_identity(alert) for alert in evicted),
+                )
+            store.alerts = next_alerts
+            total_alerts = len(next_alerts)
 
         logger.info(
             "ingested events=%d stored=%d duplicates=%d expired=%d "

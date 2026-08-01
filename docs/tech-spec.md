@@ -131,7 +131,9 @@ CLI 命令 `ai-soc analyze -i FILE -o REPORT.md`。
 
 ## 6. 数据与模型
 
-无持久化。所有处理在内存,推外部 SIEM 长期存储。
+原始事件与 correlation 窗口不持久化，长期存储仍推外部 SIEM。v0.7 可选
+`SOC_ALERT_DB` 使用标准库 SQLite 保存有界 normalized Alert，供单实例重启恢复；
+默认仍为纯内存。
 
 ## 7. 安全与合规
 

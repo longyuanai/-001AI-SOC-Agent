@@ -103,6 +103,7 @@ Thresholds live in `ai_soc_agent.config` and are overridable per deployment:
 | `SOC_SUPPRESS_ACTORS` | _empty_ | comma-separated IPs/users to allowlist |
 | `SOC_SUPPRESS_NETWORKS` | _empty_ | comma-separated CIDRs to allowlist |
 | `SOC_LOG_LEVEL` | `INFO` | server log level |
+| `SOC_ALERT_DB` | _empty_ | optional SQLite path for bounded normalized alerts |
 
 Batch mode (CLI and gateway adapter) is tuned for "scan this log file"; stream
 mode (`/ingest`) matches the correlation rule in `docs/tech-spec.md` §1 — 10
@@ -225,6 +226,23 @@ Feedback writes use the same bearer-token policy as `/ingest`. Records support
 filtering, pagination, and label summaries; they never update a threshold,
 rule, or model automatically.
 
+## Optional alert persistence
+
+The webhook server remains memory-only by default. Set `SOC_ALERT_DB` to retain
+the bounded normalized Alert store across restarts:
+
+```bash
+export SOC_ALERT_DB=/var/lib/ai-soc/alerts.db
+python -m ai_soc_agent.server
+```
+
+The standard-library SQLite repository uses transactional upserts, enforces the
+same `max_alerts` capacity as memory, removes malformed individual rows during
+recovery, and closes through the FastAPI lifespan. It persists Alert fields
+only—not raw events, credentials, tokens, or the cross-batch event window.
+SQLite is intended for one AI-SOC-Agent process; multi-replica deployments
+should continue exporting findings to the IntegrationGateway/SIEM registry.
+
 The Docker build needs both this project and its sibling `000shared-llm-core`
 path dependency. Run it from their common `003AI+网络安全` parent directory:
 
@@ -273,6 +291,7 @@ curl -H "Content-Type: application/json" \
 │   ├── ingest.py          # bounded asyncio UDP syslog receiver
 │   ├── dedup.py           # Finding fingerprint cooldown suppression
 │   ├── feedback.py        # bounded human disposition records
+│   ├── persistence.py     # optional bounded SQLite alert recovery
 │   ├── parsers.py         # sshd / evtx / nginx / okta parsers
 │   ├── patterns/          # MITRE ATT&CK rules on the v0.5 RuleEngine
 │   │   ├── base.py        # SOCPattern + shared sliding-window helpers
