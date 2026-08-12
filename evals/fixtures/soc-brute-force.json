@@ -1,0 +1,7 @@
+{
+  "summary": "Repeated synthetic authentication failures indicate a brute-force attempt.",
+  "severity": "high",
+  "confidence": 0.96,
+  "attack_pattern": "T1110 Brute Force",
+  "recommended_action": "Review the synthetic source label and apply the approved access policy."
+}

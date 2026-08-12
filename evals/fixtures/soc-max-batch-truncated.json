@@ -1,0 +1,9 @@
+{
+  "summary": "The reviewed synthetic batch indicates sustained authentication abuse.",
+  "severity": "high",
+  "confidence": 0.88,
+  "attack_pattern": "T1110 Brute Force",
+  "recommended_action": "Review the remaining synthetic events before closing the incident.",
+  "analyzed_events": 20,
+  "total_events": 25
+}

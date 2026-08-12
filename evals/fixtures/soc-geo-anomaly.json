@@ -1,0 +1,7 @@
+{
+  "summary": "Synthetic sign-ins show an implausible geographic transition.",
+  "severity": "medium",
+  "confidence": 0.84,
+  "attack_pattern": "T1078 Valid Accounts",
+  "recommended_action": "Verify the synthetic session sequence and require a fresh test login."
+}

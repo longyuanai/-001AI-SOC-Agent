@@ -1,0 +1,7 @@
+{
+  "summary": "Synthetic remote-service activity is consistent with lateral movement.",
+  "severity": "high",
+  "confidence": 0.9,
+  "attack_pattern": "T1021 Remote Services",
+  "recommended_action": "Isolate the synthetic endpoint label and inspect adjacent test events."
+}

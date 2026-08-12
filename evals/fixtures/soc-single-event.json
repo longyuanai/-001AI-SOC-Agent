@@ -1,0 +1,7 @@
+{
+  "summary": "One synthetic authentication failure does not establish a coordinated incident.",
+  "severity": "low",
+  "confidence": 0.72,
+  "attack_pattern": "isolated authentication failure",
+  "recommended_action": "Retain the synthetic event for correlation."
+}
