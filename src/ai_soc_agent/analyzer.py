@@ -22,9 +22,12 @@ from shared_llm_core import (
     ChatResponse,
     LLMRouter,
 )
-from shared_llm_core.router import TaskTier
-
 from ai_soc_agent.normalizer import NormalizedEvent
+from shared_llm_core.router import TaskTier
+from shared_llm_core.untrusted import (
+    INJECTION_GUARD_SYSTEM_PROMPT,
+    wrap_untrusted,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -77,18 +80,26 @@ incident. Respond with strict JSON matching this schema:
   "recommended_action": "one concrete action the analyst can take"
 }
 
-Never invent IPs or users. Only reason about events provided. Output JSON only."""
+Never invent IPs or users. Only reason about events provided. Output JSON only.
+
+""" + INJECTION_GUARD_SYSTEM_PROMPT
 
 
-_USER_TEMPLATE = """Events:
-{events_json}
+_USER_TEMPLATE = """Events (each block is one normalized log event):
+{event_blocks}
 
 Return JSON only."""
 
 
 def _events_to_prompt(events: list[NormalizedEvent]) -> str:
-    payload = [e.to_prompt_dict() for e in events]
-    return _USER_TEMPLATE.format(events_json=json.dumps(payload, indent=2))
+    event_blocks = "\n\n".join(
+        wrap_untrusted(
+            json.dumps(event.to_prompt_dict(), ensure_ascii=False, indent=2),
+            kind="log_event",
+        )
+        for event in events
+    )
+    return _USER_TEMPLATE.format(event_blocks=event_blocks)
 
 
 def _severity(value: Any) -> str:
