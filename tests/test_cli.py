@@ -61,6 +61,17 @@ def test_cli_syslog_rejects_non_positive_queue_size():
     assert "Invalid value for '--queue-size'" in res.output
 
 
+def test_cli_elastic_help_lists_query_and_time_window():
+    runner = CliRunner()
+    res = runner.invoke(cli, ["elastic", "--help"])
+
+    assert res.exit_code == 0
+    assert "--query" in res.output
+    assert "--start" in res.output
+    assert "--end" in res.output
+    assert "--page-size" in res.output
+
+
 def test_cli_syslog_help_uses_unprivileged_defaults():
     runner = CliRunner()
     res = runner.invoke(cli, ["syslog", "--help"])

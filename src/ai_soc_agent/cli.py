@@ -26,6 +26,7 @@ from ai_soc_agent.parsers import (
 )
 from ai_soc_agent.patterns import RULE_MANIFESTS, validate_builtin_manifests
 from ai_soc_agent.reporter import render_markdown
+from ai_soc_agent.sources.elastic import ElasticSourceError, fetch_events
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -347,6 +348,86 @@ def syslog_command(host: str, port: int, queue_size: int, json_output: bool) -> 
         click.echo("Syslog receiver stopped.", err=True)
     except OSError as exc:
         raise click.ClickException(f"could not bind UDP syslog listener: {exc}") from exc
+
+
+@cli.command("elastic")
+@click.option(
+    "--query",
+    default="*",
+    show_default=True,
+    help="Elasticsearch query_string expression.",
+)
+@click.option("--start", required=True, help="Inclusive ISO-8601 window start.")
+@click.option("--end", required=True, help="Inclusive ISO-8601 window end.")
+@click.option(
+    "--log-type",
+    type=click.Choice(_LOG_TYPES, case_sensitive=False),
+    default="sshd",
+    show_default=True,
+    help="Parser applied to each Elasticsearch hit.",
+)
+@click.option(
+    "--page-size",
+    type=click.IntRange(min=1, max=10_000),
+    default=500,
+    show_default=True,
+)
+@click.option(
+    "--max-pages",
+    type=click.IntRange(min=1),
+    default=100,
+    show_default=True,
+)
+@click.option(
+    "--brute-force-threshold",
+    type=click.IntRange(min=1),
+    default=5,
+    show_default=True,
+)
+@click.option("--json", "json_output", is_flag=True, help="Emit a Finding JSON envelope.")
+def elastic_command(
+    query: str,
+    start: str,
+    end: str,
+    log_type: str,
+    page_size: int,
+    max_pages: int,
+    brute_force_threshold: int,
+    json_output: bool,
+) -> None:
+    """Pull a bounded Elasticsearch time window and run detection rules."""
+
+    try:
+        events = fetch_events(
+            query=query,
+            start=_parse_timestamp(start),
+            end=_parse_timestamp(end),
+            log_type=log_type.casefold(),
+            page_size=page_size,
+            max_pages=max_pages,
+        )
+    except (ElasticSourceError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    findings = detect_patterns(
+        events,
+        facts={"brute_force_threshold": brute_force_threshold},
+    )
+    serialized = []
+    for finding in findings:
+        item = finding.to_dict()
+        item.pop("source")
+        serialized.append(item)
+    if json_output:
+        click.echo(
+            json.dumps(
+                {"findings": serialized},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+    click.echo(f"Fetched {len(events)} event(s); {len(serialized)} finding(s)")
 
 
 @cli.command()
