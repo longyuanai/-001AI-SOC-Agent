@@ -12,6 +12,7 @@ from typing import Any
 
 import click
 from rich.console import Console
+from shared_llm_core.telemetry import span
 
 from ai_soc_agent import __version__
 from ai_soc_agent.analyzer import AssessmentError, analyze_events
@@ -144,6 +145,17 @@ def scan_payload(
     payload: dict[str, Any], *, log_file: str | None = None
 ) -> dict[str, list[dict[str, Any]]]:
     """Convert an IntegrationGateway payload into its Finding envelope."""
+    target_type = "log_file" if log_file is not None else "event_batch"
+    with span(
+        "product.scan",
+        attributes={"product.id": "001", "scan.target_type": target_type},
+    ):
+        return _scan_payload(payload, log_file=log_file)
+
+
+def _scan_payload(
+    payload: dict[str, Any], *, log_file: str | None = None
+) -> dict[str, list[dict[str, Any]]]:
     events, threshold = _payload_events(payload, log_file=log_file)
     findings = detect_patterns(
         events,
