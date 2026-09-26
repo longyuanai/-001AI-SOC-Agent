@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from xml.etree import ElementTree
 
+from ai_soc_agent.config import login_path_segments
 from ai_soc_agent.normalizer import NormalizedEvent
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,14 @@ _NGINX_COMBINED_RE = re.compile(
     r'"(?P<method>\S+)\s+(?P<request>\S+)(?:\s+(?P<protocol>[^"]+))?"\s+'
     r'(?P<status>\d{3})\s+(?P<bytes>\d+|-)\s+'
     r'"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"$'
+)
+
+#: Only these verbs submit credentials; GET /login is just loading the form.
+_AUTH_METHODS = frozenset({"POST", "PUT", "PATCH"})
+
+#: Static assets never authenticate, whatever they are named (login.css).
+_STATIC_SUFFIXES = frozenset(
+    {"css", "js", "map", "png", "jpg", "jpeg", "gif", "svg", "ico", "woff", "woff2", "ttf"}
 )
 
 _OKTA_EVENT_ACTIONS = {
@@ -270,6 +279,30 @@ def parse_evtx_line(line: str) -> NormalizedEvent | None:
     return _parse_evtx_element(root, raw=raw)
 
 
+def is_login_endpoint(request: str) -> bool:
+    """Return whether a request target looks like an authentication endpoint.
+
+    Needed because every nginx event used to be ``action="http_request"``, which
+    carries no "login" token, so T1110 could never fire on web brute force.
+    Custom routes are added through ``SOC_LOGIN_PATH_SEGMENTS``.
+    """
+    path = request.split("?", 1)[0].split("#", 1)[0]
+    segments = [segment.casefold() for segment in path.split("/") if segment]
+    if not segments:
+        return False
+
+    last = segments[-1]
+    stem, _, suffix = last.rpartition(".")
+    if stem and suffix in _STATIC_SUFFIXES:
+        return False
+
+    login_segments = login_path_segments()
+    if any(segment in login_segments for segment in segments):
+        return True
+    # wp-login.php, user_login.jsp, doSignin.do, ...
+    return any(token in (stem or last) for token in ("login", "signin", "logon"))
+
+
 def parse_nginx_line(line: str) -> NormalizedEvent | None:
     """Parse one Nginx combined access-log line."""
     raw = line.rstrip("\r\n")
@@ -290,9 +323,13 @@ def parse_nginx_line(line: str) -> NormalizedEvent | None:
     else:
         result = "unknown"
 
+    method = match.group("method")
+    request = match.group("request")
+    is_login = method.upper() in _AUTH_METHODS and is_login_endpoint(request)
+
     bytes_sent = match.group("bytes")
     extra = {
-        "method": match.group("method"),
+        "method": method,
         "status": status,
         "bytes_sent": None if bytes_sent == "-" else int(bytes_sent),
         "protocol": match.group("protocol") or "",
@@ -303,8 +340,8 @@ def parse_nginx_line(line: str) -> NormalizedEvent | None:
     return NormalizedEvent(
         ts=ts,
         actor=match.group("ip"),
-        action="http_request",
-        target=match.group("request"),
+        action="web_login" if is_login else "http_request",
+        target=request,
         result=result,
         source="nginx",
         raw=raw,

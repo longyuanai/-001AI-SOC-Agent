@@ -225,7 +225,15 @@ class SOCPattern(Rule):
     technique: str
     severity_default = FindingSeverity.HIGH
     confidence_default = 0.85
-    severity_hint = "high"
+
+    @property
+    def severity_hint(self) -> str:
+        """String form of ``severity_default``, for callers that introspect rules.
+
+        Derived rather than stored: as a plain class attribute it kept saying
+        "high" for any subclass that lowered ``severity_default``.
+        """
+        return self.severity_default.value
 
     @abstractmethod
     def matched_groups(self, ctx: RuleContext) -> tuple[tuple[Any, ...], ...]:
