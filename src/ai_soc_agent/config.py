@@ -64,6 +64,33 @@ def _env_set(name: str) -> frozenset[str]:
     return frozenset(item.strip() for item in raw.split(",") if item.strip())
 
 
+# Request-path segments that mark an nginx request as a credential submission.
+# Deployments add their own (e.g. `j_security_check`) through
+# SOC_LOGIN_PATH_SEGMENTS; additions extend the defaults, never replace them.
+DEFAULT_LOGIN_PATH_SEGMENTS = frozenset(
+    {
+        "auth",
+        "authenticate",
+        "login",
+        "log-in",
+        "logon",
+        "oauth",
+        "session",
+        "sessions",
+        "signin",
+        "sign-in",
+        "sso",
+        "token",
+    }
+)
+
+
+def login_path_segments() -> frozenset[str]:
+    """Return the auth path segments, including any environment additions."""
+    extra = {segment.casefold() for segment in _env_set("LOGIN_PATH_SEGMENTS")}
+    return DEFAULT_LOGIN_PATH_SEGMENTS | extra
+
+
 @dataclass(frozen=True)
 class Suppression:
     """Actors whose activity should never raise a finding.

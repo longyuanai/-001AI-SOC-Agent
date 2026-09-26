@@ -107,6 +107,7 @@ Thresholds live in `ai_soc_agent.config` and are overridable per deployment:
 | `SOC_CREDENTIAL_STUFFING_WINDOW_SECONDS` | 600 | cross-source window |
 | `SOC_SUPPRESS_ACTORS` | _empty_ | comma-separated IPs/users to allowlist |
 | `SOC_SUPPRESS_NETWORKS` | _empty_ | comma-separated CIDRs to allowlist |
+| `SOC_LOGIN_PATH_SEGMENTS` | _empty_ | extra nginx path segments that mark a login (added to `login`, `signin`, `oauth`, `session`, `token`, …); a POST/PUT/PATCH to one counts as a `web_login` for T1110 |
 | `SOC_LOG_LEVEL` | `INFO` | server log level |
 | `SOC_ALERT_DB` | _empty_ | optional SQLite path for bounded normalized alerts |
 
