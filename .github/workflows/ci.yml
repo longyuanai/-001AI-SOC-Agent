@@ -19,23 +19,49 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      # The suite expects sibling checkouts, so lay the workspace out the same
+      # way. The in-repo contract stub (tests/_contract_stub) no longer covers
+      # what main imports from shared-llm-core (untrusted, evaluation), so the
+      # real package is required.
+      - name: Check out this repository
+        uses: actions/checkout@v4
+        with:
+          path: 001AI-SOC-Agent
+
+      - name: Check out shared-llm-core
+        uses: actions/checkout@v4
+        with:
+          repository: longyuanai/000shared-llm-core
+          path: 000shared-llm-core
+
+      # Optional: only the gateway adapter tests need it, and they skip
+      # themselves when it is absent.
+      - name: Check out shared-integration
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: longyuanai/-000shared-integration
+          path: 000shared-integration
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      # shared-llm-core is a path dependency on a sibling repo that is not
-      # available here, so install the runtime deps directly. Tests fall back
-      # to tests/_contract_stub for the shared package.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install click rich fastapi uvicorn pytest pytest-mock httpx ruff
+          python -m pip install ./000shared-llm-core
+          # The gateway (celery, sqlalchemy, ...) only when it was checked out.
+          if [ -f 000shared-integration/pyproject.toml ]; then
+            python -m pip install ./000shared-integration
+          fi
+          python -m pip install click rich fastapi uvicorn pytest pytest-mock httpx "ruff>=0.16,<0.17"
 
       - name: Lint
+        working-directory: 001AI-SOC-Agent
         run: ruff check src tests
 
       - name: Test
+        working-directory: 001AI-SOC-Agent
         run: python -m pytest -q
